@@ -1,166 +1,47 @@
-<!DOCTYPE html>
-<html lang="el">
+<!doctype html>
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Production Serverless Voice Chat</title>
-    <!-- Injected styling & QR Generator Library (Zero terminal installation) -->
-    <script src="https://jsdelivr.net"></script>
-    <style>
-        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #f8fafc; text-align: center; padding: 20px; margin: 0; }
-        .wrapper { max-width: 500px; margin: 30px auto; background: #1e293b; padding: 30px; border-radius: 16px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3); border: 1px solid #334155; }
-        h2 { margin-top: 0; color: #38bdf8; }
-        .status { padding: 12px; border-radius: 8px; font-weight: bold; background: #334155; margin-bottom: 20px; font-size: 14px; border-left: 4px solid #e2e8f0; }
-        textarea { width: 100%; height: 90px; background: #0f172a; color: #38bdf8; border: 1px solid #475569; border-radius: 8px; padding: 10px; font-family: monospace; font-size: 11px; box-sizing: border-box; resize: none; margin-bottom: 10px; }
-        button { background: #0284c7; color: white; border: none; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; width: 100%; margin: 5px 0; font-size: 14px; transition: background 0.2s; }
-        button:hover { background: #0369a1; }
-        .secondary-btn { background: #22c55e; }
-        .secondary-btn:hover { background: #16a34a; }
-        #canvas-container { margin: 15px 0; display: inline-block; background: white; padding: 10px; border-radius: 8px; display: none; }
-        hr { border: 0; border-top: 1px solid #334155; margin: 20px 0; }
-    </style>
+  <meta charset="utf-8" />
+  <title>LAN Voice Chat</title>
 </head>
 <body>
+  <h2>Voice Chat</h2>
 
-    <div class="wrapper">
-        <h2>P2P LAN/Cloud Voice Chat</h2>
-        <div id="status-panel" class="status">Initialising system audio...</div>
+  <button id="start">Start</button>
+  <button id="call">Call</button>
+  <button id="answer">Answer</button>
 
-        <!-- STEP 1: HOST GENERATION -->
-        <div id="host-section">
-            <p style="font-size: 13px; color: #94a3b8; text-align: left; margin: 0 0 10px 0;"><strong>HOST (User A):</strong> Click below to generate a direct audio link.</p>
-            <button id="init-host-btn">1. Generate Voice Invite</button>
-            <div id="canvas-container"><canvas id="qrcode"></canvas></div>
-        </div>
+  <textarea id="out" style="width:100%;height:120px;"></textarea>
+  <textarea id="in" style="width:100%;height:120px;"></textarea>
 
-        <hr>
+  <script src="https://unpkg.com/simple-peer/simplepeer.min.js"></script>
+  <script>
+    let peer, stream;
 
-        <!-- STEP 2: PEER HANDSHAKE -->
-        <div id="join-section">
-            <p style="font-size: 13px; color: #94a3b8; text-align: left; margin: 0 0 10px 0;"><strong>PEER (User B):</strong> Paste your friend's connection string below, or accept an incoming response.</p>
-            <textarea id="sdp-transfer-box" placeholder="Paste the handshake string here..."></textarea>
-            <button id="process-sdp-btn" class="secondary-btn">2. Accept & Process Connection</button>
-        </div>
-    </div>
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(s => {
+      stream = s;
+    });
 
-    <!-- Live Hardware Playback Stream Container -->
-    <audio id="network-audio-render" autoplay></audio>
+    function createPeer(initiator){
+      peer = new SimplePeer({ initiator, trickle: false, stream });
 
-    <script>
-        const statusPanel = document.getElementById('status-panel');
-        const sdpBox = document.getElementById('sdp-transfer-box');
-        const audioDom = document.getElementById('network-audio-render');
-        
-        let localMicStream = null;
-        let rtcPeer = null;
+      peer.on('signal', data => {
+        document.getElementById("out").value = JSON.stringify(data);
+      });
 
-        // Force explicit initialization mapping for STUN bypass (works flawlessly over raw LAN)
-        const webRtcConfig = { iceServers: [{ urls: 'stun:://google.com' }] };
+      peer.on('stream', remote => {
+        let audio = new Audio();
+        audio.srcObject = remote;
+        audio.play();
+      });
+    }
 
-        // Auto-request local microphone access on load
-        navigator.mediaDevices.getUserMedia({ audio: true, video: false })
-            .then(stream => {
-                localMicStream = stream;
-                updateStatus("Microphone Ready! System primed.", "#22c55e");
-            })
-            .catch(err => {
-                updateStatus("Error: Access to microphone denied! Ensure HTTPS or Localhost.", "#ef4444");
-                console.error(err);
-            });
+    document.getElementById("start").onclick = () => createPeer(false);
+    document.getElementById("call").onclick = () => createPeer(true);
 
-        function updateStatus(text, color = "#e2e8f0") {
-            statusPanel.innerText = text;
-            statusPanel.style.borderLeftColor = color;
-        }
-
-        function createCorePeerConnection() {
-            rtcPeer = new RTCPeerConnection(webRtcConfig);
-            
-            // Map physical mic tracks directly into WebRTC engine pipelines
-            localMicStream.getTracks().forEach(track => rtcPeer.addTrack(track, localMicStream));
-
-            // Remote audio listener binding execution
-            rtcPeer.ontrack = (event) => {
-                if (event.streams && event.streams[0]) {
-                    audioDom.srcObject = event.streams[0];
-                    updateStatus("CONNECTED LIVE! Speak freely.", "#22c55e");
-                }
-            };
-        }
-
-        // ================= USER A: GENERATE INVITATION =================
-        document.getElementById('init-host-btn').addEventListener('click', async () => {
-            if (!localMicStream) return alert("Microphone channel is not active!");
-            updateStatus("Generating Network Handshake Profile...", "#38bdf8");
-            
-            createCorePeerConnection();
-
-            const sessionOffer = await rtcPeer.createOffer();
-            await rtcPeer.setLocalDescription(sessionOffer);
-
-            // Wait for ICE parsing to complete network map profile allocation
-            setTimeout(() => {
-                const packetString = btoa(JSON.stringify(rtcPeer.localDescription));
-                sdpBox.value = packetString;
-                
-                // Build a URL containing the network invitation configuration parameters
-                const appUri = window.location.origin + window.location.pathname + "?invite=" + packetString;
-                
-                // Render a QR code copy reference instantly inside UI viewport layout frame
-                const canvasBox = document.getElementById('canvas-container');
-                canvasBox.style.display = "inline-block";
-                QRCode.toCanvas(document.getElementById('qrcode'), appUri, { width: 180 }, function (error) {
-                    if (error) console.error(error);
-                });
-
-                updateStatus("Invite code ready! Copy the textbox contents or scan the QR code.", "#38bdf8");
-            }, 800);
-        });
-
-        // ================= AUTOMATED PARSING ENGINE (URL INVITATIONS) =================
-        const URLQueryPayload = new URLSearchParams(window.location.search).get('invite');
-        if (URLQueryPayload) {
-            window.addEventListener('load', () => {
-                setTimeout(() => {
-                    if (!localMicStream) return updateStatus("Grant mic permission then reload link.", "#ef4444");
-                    sdpBox.value = URLQueryPayload;
-                    updateStatus("Link detected! Click 'Accept & Process Connection' to link.", "#38bdf8");
-                }, 1000);
-            });
-        }
-
-        // ================= USER B/A: PROCESSING HANDSHAKE SEQUENCES =================
-        document.getElementById('process-sdp-btn').addEventListener('click', async () => {
-            const incomingPayload = sdpBox.value.trim();
-            if (!incomingPayload) return alert("Please enter the cryptographic handshake string first!");
-
-            try {
-                const parsedSession = JSON.parse(atob(incomingPayload));
-
-                if (parsedSession.type === "offer") {
-                    // USER B PROCESSES OFFER AND CREATES THE FINAL ANSWER
-                    createCorePeerConnection();
-                    await rtcPeer.setRemoteDescription(new RTCSessionDescription(parsedSession));
-                    
-                    const sessionAnswer = await rtcPeer.createAnswer();
-                    await rtcPeer.setLocalDescription(sessionAnswer);
-
-                    setTimeout(() => {
-                        sdpBox.value = btoa(JSON.stringify(rtcPeer.localDescription));
-                        updateStatus("Answer generated! Send the new string back to User A.", "#ff9800");
-                        document.getElementById('canvas-container').style.display = "none";
-                    }, 800);
-
-                } else if (parsedSession.type === "answer") {
-                    // USER A RECEIVES THE ANSWER AND OPENS PIPELINE FLUIDITY
-                    await rtcPeer.setRemoteDescription(new RTCSessionDescription(parsedSession));
-                    updateStatus("Establishing P2P tunnel streams...", "#22c55e");
-                }
-            } catch (runtimeException) {
-                alert("Invalid cryptographic packet data string provided!");
-                console.error(runtimeException);
-            }
-        });
-    </script>
+    document.getElementById("answer").onclick = () => {
+      peer.signal(JSON.parse(document.getElementById("in").value));
+    };
+  </script>
 </body>
 </html>
