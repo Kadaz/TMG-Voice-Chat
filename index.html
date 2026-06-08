@@ -3,30 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fixed Voice Chat</title>
+    <title>Working Voice Chat</title>
     <script src="https://unpkg.com"></script>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 50px; background: #f0f2f5; }
         .box { background: white; padding: 30px; border-radius: 10px; width: 320px; margin: 0 auto; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        button { background: #007bff; color: white; border: none; padding: 12px 20px; border-radius: 5px; cursor: pointer; margin-top: 10px; font-weight: bold; width: 100%; }
+        button { background: #007bff; color: white; border: none; padding: 12px; border-radius: 5px; cursor: pointer; width: 100%; font-weight: bold; margin-top: 10px; }
         button:hover { background: #0056b3; }
-        input { padding: 10px; width: 90%; text-align: center; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 5px; font-size: 16px; }
-        #status { font-weight: bold; margin-top: 20px; color: #d9534f; background: #f9f2f2; padding: 8px; border-radius: 5px; }
+        input { padding: 10px; width: 90%; text-align: center; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 5px; }
+        #status { font-weight: bold; margin-top: 20px; padding: 10px; border-radius: 5px; background: #e2e3e5; color: #383d41; }
     </style>
 </head>
 <body>
 
     <div class="box">
-        <h3>Voice Chat (P2P)</h3>
-        <p>Το ID σου: <span id="my-id" style="font-weight:bold; color:green; font-size: 20px;">Σύνδεση...</span></p>
+        <h3>Voice Chat (Fixed)</h3>
+        <p>Το ID σου: <span id="my-id" style="font-weight:bold; color:green; font-size: 20px;">...</span></p>
         <hr>
-        <p>Σύνδεση με φίλο:</p>
         <input type="text" id="peer-id" placeholder="Βάλε το ID του φίλου">
-        <br>
         <button id="call-btn">Έναρξη Κλήσης</button>
-        <div id="status">Παρακαλώ επιτρέψτε το μικρόφωνο...</div>
+        <div id="status">Αναμονή για μικρόφωνο...</div>
     </div>
 
+    <!-- Το στοιχείο ήχου -->
     <audio id="remote-audio" autoplay></audio>
 
     <script>
@@ -34,85 +33,65 @@
         let myStream = null;
         let peer = null;
 
-        // ΒΗΜΑ 1: Ζητάμε το μικρόφωνο ΑΜΕΣΩΣ με το που ανοίγει η σελίδα
+        // 1. Πρώτα παίρνουμε οπωσδήποτε το μικρόφωνο
         navigator.mediaDevices.getUserMedia({ audio: true, video: false })
             .then((stream) => {
                 myStream = stream;
-                statusDiv.style.color = "#5cb85c";
-                statusDiv.style.background = "#f2f9f2";
-                statusDiv.innerText = "Το μικρόφωνο είναι έτοιμο! Συνδέεται στον server...";
-                
-                // ΒΗΜΑ 2: Αφού πάρουμε το μικρόφωνο, συνδεόμαστε στον Server με IceServers (STUN) της Google
+                statusDiv.innerText = "Το μικρόφωνο είναι έτοιμο. Σύνδεση στον server...";
                 initPeer();
             })
             .catch(err => {
-                statusDiv.innerText = "ΣΦΑΛΜΑ: Πρέπει να επιτρέψετε πρόσβαση στο μικρόφωνο για να λειτουργήσει!";
+                statusDiv.style.background = "#f8d7da";
+                statusDiv.style.color = "#721c24";
+                statusDiv.innerText = "Σφάλμα: Δεν δόθηκε πρόσβαση στο μικρόφωνο.";
                 console.error(err);
             });
 
+        // 2. Σύνδεση στον PeerJS Server
         function initPeer() {
             const myId = Math.floor(1000 + Math.random() * 9000).toString();
             
-            // Ρύθμιση για προσπέραση Firewalls/Routers
             peer = new Peer(myId, {
-                config: {
-                    'iceServers': [
-                        { url: 'stun:://google.com' },
-                        { url: 'stun:://google.com' }
-                    ]
-                }
+                config: { 'iceServers': [{ url: 'stun:://google.com' }] }
             });
 
-            // Όταν ο server μας δώσει το πράσινο φως
             peer.on('open', (id) => {
                 document.getElementById('my-id').innerText = id;
-                statusDiv.style.color = "#007bff";
-                statusDiv.innerText = "Έτοιμο! Δώσε το ID σου στον φίλο σου ή βάλε το δικό του.";
+                statusDiv.innerText = "Έτοιμο! Δώσε το ID σου ή κάλεσε κάποιον.";
             });
 
-            // Διαχείριση σφαλμάτων δικτύου
-            peer.on('error', (err) => {
-                statusDiv.style.color = "#d9534f";
-                if(err.type === 'peer-unavailable') {
-                    statusDiv.innerText = "Το ID του φίλου δεν βρέθηκε. Είναι online;";
-                } else {
-                    statusDiv.innerText = "Σφάλμα σύνδεσης: " + err.type;
-                }
-            });
-
-            // Απάντηση σε εισερχόμενη κλήση
-            peer.on('call', (call) => {
-                statusDiv.style.color = "#5cb85c";
-                statusDiv.innerText = "Σε κλήση... (Συνδέθηκε)";
-                call.answer(myStream); 
+            // 3. Όταν κάποιος ΜΑΣ καλεί (Αποδοχή)
+            peer.on('call', (incomingCall) => {
+                statusDiv.innerText = "Δεχτήκατε κλήση! Σύνδεση ήχου...";
                 
-                call.on('stream', (remoteStream) => {
-                    document.getElementById('remote-audio').srcObject = remoteStream;
+                // Απαντάμε στέλνοντας το δικό μας stream
+                incomingCall.answer(myStream);
+                
+                // Ακούμε το stream του ατόμου που μας κάλεσε
+                incomingCall.on('stream', (remoteStream) => {
+                    const remoteAudio = document.getElementById('remote-audio');
+                    remoteAudio.srcObject = remoteStream;
+                    statusDiv.innerText = "Σε κλήση! Μιλήστε ελεύθερα.";
                 });
             });
         }
 
-        // Πραγματοποίηση κλήσης
+        // 4. Όταν ΕΜΕΙΣ καλούμε κάποιον άλλον (Έναρξη)
         document.getElementById('call-btn').addEventListener('click', () => {
             const remoteId = document.getElementById('peer-id').value.trim();
-            if (!remoteId) {
-                alert("Παρακαλώ πληκτρολογήστε ένα ID!");
-                return;
-            }
-            if (!myStream || !peer) {
-                alert("Δεν έχει ολοκληρωθεί η σύνδεση ακόμα!");
-                return;
-            }
+            if (!remoteId) return alert("Βάλε το ID του φίλου σου!");
+            if (!myStream || !peer) return alert("Ο server δεν έχει συνδεθεί ακόμα.");
 
-            statusDiv.style.color = "#007bff";
             statusDiv.innerText = "Κλήση στον " + remoteId + "...";
-
-            const call = peer.call(remoteId, myStream);
             
-            call.on('stream', (remoteStream) => {
-                statusDiv.style.color = "#5cb85c";
-                statusDiv.innerText = "Σε κλήση! Μπορείτε να μιλήσετε.";
-                document.getElementById('remote-audio').srcObject = remoteStream;
+            // Πραγματοποίηση της κλήσης στέλνοντας το μικρόφωνό μας
+            const outgoingCall = peer.call(remoteId, myStream);
+            
+            // Περιμένουμε να απαντήσει ο άλλος για να πάρουμε τη φωνή του
+            outgoingCall.on('stream', (remoteStream) => {
+                const remoteAudio = document.getElementById('remote-audio');
+                remoteAudio.srcObject = remoteStream;
+                statusDiv.innerText = "Σε κλήση! Μιλήστε ελεύθερα.";
             });
         });
     </script>
