@@ -1,20 +1,54 @@
-<h1>It works 🔥</h1>
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Firebase Chat</title>
+</head>
+<body>
+
+<h2>💬 Live Chat</h2>
+
+<input id="msg" placeholder="γράψε μήνυμα">
+<button onclick="sendMsg()">Send</button>
+
+<ul id="list"></ul>
 
 <script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js";
+import { getFirestore, collection, addDoc, onSnapshot, query, orderBy } 
+from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
 
-  const firebaseConfig = {
-    apiKey: "AIzaSyBBQDKV4YiwW8CBlxSXwgV6ppGuvC_mLPs",
-    authDomain: "tmg-voice-chat.firebaseapp.com",
-    projectId: "tmg-voice-chat",
-    storageBucket: "tmg-voice-chat.firebasestorage.app",
-    messagingSenderId: "928730903900",
-    appId: "1:928730903900:web:0744dc6a61163539803d99"
-  };
+const firebaseConfig = {
+  apiKey: "AIzaSyBBQDKV4YiwW8CBlxSXwgV6ppGuvC_mLPs",
+  authDomain: "tmg-voice-chat.firebaseapp.com",
+  projectId: "tmg-voice-chat"
+};
 
-  initializeApp(firebaseConfig);
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
 
-  console.log("Firebase connected");
+window.sendMsg = async function () {
+  let msg = document.getElementById("msg").value;
+
+  await addDoc(collection(db, "messages"), {
+    text: msg,
+    time: Date.now()
+  });
+
+  document.getElementById("msg").value = "";
+}
+
+const q = query(collection(db, "messages"), orderBy("time"));
+
+onSnapshot(q, (snapshot) => {
+  let list = document.getElementById("list");
+  list.innerHTML = "";
+
+  snapshot.forEach(doc => {
+    let li = document.createElement("li");
+    li.innerText = doc.data().text;
+    list.appendChild(li);
+  });
+});
 </script>
 
 </body>
