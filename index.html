@@ -1,128 +1,99 @@
 <!doctype html>
 <html>
 <head>
-  <meta charset="utf-8" />
-  <title>Voice Chat FIXED</title>
+  <meta charset="utf-8">
+  <title>Simple Voice Chat</title>
 </head>
 <body>
-  <h2>Voice Chat FIXED</h2>
 
-  <input id="room" placeholder="room id" />
-  <button onclick="start(true)">Join (Host)</button>
-  <button onclick="start(false)">Join (Guest)</button>
-  <button onclick="hang()">Hang</button>
+<h2>VOICE CHAT</h2>
 
-  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+<input id="room" placeholder="room id">
+<button onclick="join()">Join Room</button>
 
-  <script>
-    const firebaseConfig = {
-      apiKey: "AIzaSyBBQDKV4YiwW8CBlxSXwgV6ppGuvC_mLPs",
-      authDomain: "tmg-voice-chat.firebaseapp.com",
-      projectId: "tmg-voice-chat",
-      storageBucket: "tmg-voice-chat.firebasestorage.app",
-      messagingSenderId: "928730903900",
-      appId: "1:928730903900:web:0744dc6a61163539803d99",
-      measurementId: "G-LSX97H9TQH"
-    };
+<script>
+let pc;
+let localStream;
+let roomId;
 
-    firebase.initializeApp(firebaseConfig);
-    const db = firebase.firestore();
+// 🟢 public signaling server (δεν χρειάζεται setup)
+const SIGNALING = "https://signaling.simplewebrtc.dev";
 
-    let pc;
-    let roomRef;
-    let stream;
-    let isHost = false;
+async function getMic() {
+  localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+}
 
-    const servers = {
-      iceServers: [
-        { urls: "stun:stun.l.google.com:19302" }
-      ]
-    };
+function setupPeer() {
+  pc = new RTCPeerConnection({
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+  });
 
-    async function getStream() {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+
+  pc.ontrack = (e) => {
+    const audio = document.createElement("audio");
+    audio.autoplay = true;
+    audio.srcObject = e.streams[0];
+    document.body.appendChild(audio);
+  };
+
+  pc.onicecandidate = async (e) => {
+    if (!e.candidate) return;
+
+    await fetch(`${SIGNALING}/signal`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        room: roomId,
+        candidate: e.candidate
+      })
+    });
+  };
+}
+
+async function join() {
+  roomId = document.getElementById("room").value;
+
+  await getMic();
+  setupPeer();
+
+  // create or join
+  const offerRes = await fetch(`${SIGNALING}/offer?room=${roomId}`);
+  const offer = await offerRes.json();
+
+  if (!offer || !offer.sdp) {
+    const newOffer = await pc.createOffer();
+    await pc.setLocalDescription(newOffer);
+
+    await fetch(`${SIGNALING}/offer`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ room: roomId, sdp: newOffer })
+    });
+
+  } else {
+    await pc.setRemoteDescription(offer);
+
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+
+    await fetch(`${SIGNALING}/answer`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ room: roomId, sdp: answer })
+    });
+  }
+
+  setInterval(async () => {
+    const res = await fetch(`${SIGNALING}/answer?room=${roomId}`);
+    const answer = await res.json();
+
+    if (answer?.sdp && !pc.currentRemoteDescription) {
+      await pc.setRemoteDescription(answer);
     }
+  }, 2000);
+}
+</script>
 
-    function createPeer() {
-      pc = new RTCPeerConnection(servers);
-
-      stream.getTracks().forEach(t => pc.addTrack(t, stream));
-
-      pc.ontrack = (e) => {
-        const audio = document.createElement("audio");
-        audio.autoplay = true;
-        audio.controls = false;
-        audio.srcObject = e.streams[0];
-        document.body.appendChild(audio);
-      };
-
-      pc.onicecandidate = async (e) => {
-        if (!e.candidate) return;
-
-        const col = isHost ? "hostCandidates" : "guestCandidates";
-        await roomRef.collection(col).add(e.candidate.toJSON());
-      };
-
-      pc.onconnectionstatechange = () => {
-        console.log("STATE:", pc.connectionState);
-      };
-    }
-
-    async function start(host) {
-      isHost = host;
-
-      const roomId = document.getElementById("room").value;
-      roomRef = db.collection("rooms").doc(roomId);
-
-      await getStream();
-      createPeer();
-
-      if (host) {
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-
-        await roomRef.set({ offer });
-
-        roomRef.onSnapshot(async snap => {
-          const data = snap.data();
-          if (data?.answer && !pc.currentRemoteDescription) {
-            await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-          }
-        });
-
-        roomRef.collection("hostCandidates").onSnapshot(snap => {
-          snap.docChanges().forEach(async c => {
-            if (c.type === "added") {
-              await pc.addIceCandidate(new RTCIceCandidate(c.doc.data()));
-            }
-          });
-        });
-
-      } else {
-        const doc = await roomRef.get();
-        const offer = doc.data().offer;
-
-        await pc.setRemoteDescription(new RTCSessionDescription(offer));
-
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-
-        await roomRef.update({ answer });
-
-        roomRef.collection("guestCandidates").onSnapshot(snap => {
-          snap.docChanges().forEach(async c => {
-            if (c.type === "added") {
-              await pc.addIceCandidate(new RTCIceCandidate(c.doc.data()));
-            }
-          });
-        });
-      }
-    }
-
-    function hang() {
-      if (pc) pc.close();
-    }
-  </script>
 </body>
 </html>
