@@ -1,14 +1,16 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Voice Chat</title>
+  <title>WebRTC Voice Test</title>
 </head>
 <body>
 
-<h2>🎤 Simple Voice Chat</h2>
+<h2>🎤 Voice Chat (2 Tabs Test)</h2>
 
-<button id="start">Start Call</button>
-<button id="stop">Stop</button>
+<button id="join">Join</button>
+<button id="hangup">Hang Up</button>
+
+<audio id="remoteAudio" autoplay></audio>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js";
@@ -24,7 +26,6 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// ICE servers (για connection)
 const servers = {
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
 };
@@ -32,38 +33,86 @@ const servers = {
 let pc;
 let localStream;
 
-// START CALL
-document.getElementById("start").onclick = async () => {
+document.getElementById("join").onclick = async () => {
+  pc = new RTCPeerConnection(servers);
+
+  // AUDIO INPUT
+  localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+  localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+  // REMOTE AUDIO
+  pc.ontrack = (event) => {
+    document.getElementById("remoteAudio").srcObject = event.streams[0];
+  };
+
+  // ICE
+  pc.onicecandidate = async (event) => {
+    if (event.candidate) {
+      await setDoc(doc(db, "call", "candidate"), {
+        c: JSON.stringify(event.candidate)
+      });
+    }
+  };
+
+  const callDoc = doc(db, "call", "room");
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  await setDoc(callDoc, {
+    offer: JSON.stringify(offer)
+  });
+
+  // listen for answer
+  onSnapshot(callDoc, (snap) => {
+    const data = snap.data();
+    if (!data) return;
+
+    if (data.answer && !pc.currentRemoteDescription) {
+      pc.setRemoteDescription(JSON.parse(data.answer));
+    }
+  });
+};
+
+// SECOND TAB MUST RUN SAME CODE
+async function answerCall() {
   pc = new RTCPeerConnection(servers);
 
   localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
   localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
+  pc.ontrack = (event) => {
+    document.getElementById("remoteAudio").srcObject = event.streams[0];
+  };
 
-  await setDoc(doc(db, "calls", "room1"), {
-    offer: JSON.stringify(offer)
+  const callDoc = doc(db, "call", "room");
+  const callData = (await getDoc(callDoc)).data();
+
+  if (!callData?.offer) return;
+
+  await pc.setRemoteDescription(JSON.parse(callData.offer));
+
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+
+  await setDoc(callDoc, {
+    answer: JSON.stringify(answer)
   });
 
   pc.onicecandidate = async (event) => {
     if (event.candidate) {
-      await setDoc(doc(db, "calls", "candidate"), {
-        candidate: JSON.stringify(event.candidate)
+      await setDoc(doc(db, "call", "candidate"), {
+        c: JSON.stringify(event.candidate)
       });
     }
   };
+}
 
-  onSnapshot(doc(db, "calls", "answer"), (snap) => {
-    if (snap.exists()) {
-      const answer = JSON.parse(snap.data().answer);
-      pc.setRemoteDescription(answer);
-    }
-  });
-};
+// auto try answer after 2 sec (second tab)
+setTimeout(answerCall, 2000);
 
-// STOP
-document.getElementById("stop").onclick = () => {
+document.getElementById("hangup").onclick = () => {
   if (pc) pc.close();
   if (localStream) localStream.getTracks().forEach(t => t.stop());
 };
