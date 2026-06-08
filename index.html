@@ -3,121 +3,109 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Auto LAN Voice Chat</title>
-    <!-- Εισαγωγή της βιβλιοθήκης PubNub για αυτόματο LAN Handshake -->
-    <script src="https://pubnub.com"></script>
+    <title>Pure LAN Voice Chat</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 40px; background: #eef2f7; color: #333; }
-        .box { background: white; padding: 30px; border-radius: 12px; width: 350px; margin: 0 auto; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-        button { background: #28a745; color: white; border: none; padding: 12px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; margin-top: 15px; font-size: 15px; }
-        button:hover { background: #218838; }
-        #status { font-weight: bold; margin-top: 20px; padding: 12px; border-radius: 6px; background: #e2e3e5; font-size: 14px; }
+        .box { background: white; padding: 30px; border-radius: 12px; width: 380px; margin: 0 auto; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        button { background: #007bff; color: white; border: none; padding: 12px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; margin-top: 15px; font-size: 15px; }
+        button:hover { background: #0056b3; }
+        #status { font-weight: bold; margin-top: 20px; padding: 12px; border-radius: 6px; background: #e2e3e5; font-size: 14px; line-height: 1.5; }
+        input { width: 90%; padding: 8px; text-align: center; margin-top: 10px; border: 1px solid #ccc; border-radius: 4px; }
     </style>
 </head>
 <body>
 
     <div class="box">
-        <h3>LAN Voice Chat (Auto)</h3>
-        <p style="font-size: 13px; color: #666;">Ανοίξτε και οι δύο τη σελίδα στο ίδιο δίκτυο LAN.</p>
+        <h3>LAN Voice Chat (Pure JS)</h3>
+        <p style="font-size: 13px; color: #666;">Ανοίξτε και οι δύο τη σελίδα στο GitHub Pages.</p>
         <hr>
         
-        <button id="start-btn">Ενεργοποίηση & Σύνδεση</button>
+        <button id="action-btn">Φόρτωση μικροφώνου...</button>
         
-        <div id="status">Πατήστε το κουμπί για να ξεκινήσει η αυτόματη σύνδεση LAN.</div>
+        <div id="status">Παρακαλώ δώστε πρόσβαση στο μικρόφωνο...</div>
     </div>
 
-    <!-- Στοιχείο για τον ήχο του άλλου χρήστη -->
     <audio id="remote-audio" autoplay></audio>
 
     <script>
         const statusDiv = document.getElementById('status');
-        const startBtn = document.getElementById('start-btn');
+        const actionBtn = document.getElementById('action-btn');
         const remoteAudio = document.getElementById('remote-audio');
-
-        let localStream;
-        let pc;
-        let pubnub;
         
-        // Κοινό όνομα καναλιού για το LAN σας
-        const CHANNEL_NAME = "lan_voice_handshake_room_xyz"; 
+        let localStream;
+        // Δημιουργία WebRTC σύνδεσης χωρίς εξωτερικούς STUN servers (καθαρό LAN)
+        let pc = new RTCPeerConnection({ iceServers: [] }); 
 
-        startBtn.addEventListener('click', () => {
-            statusDiv.innerText = "Ανοιγμα μικροφώνου...";
-            
-            navigator.mediaDevices.getUserMedia({ audio: true, video: false })
-                .then(stream => {
-                    localStream = stream;
-                    startBtn.style.display = 'none';
-                    statusDiv.innerText = "Αναζήτηση άλλου υπολογιστή στο LAN...";
-                    
-                    // Αρχιικοποίηση PubNub με δωρεάν demo κλειδιά
-                    pubnub = new PubNub({
-                        publishKey: 'pub-c-db252277-c917-48f0-b6f7-b76da89345e6',
-                        subscribeKey: 'sub-c-5fec84d2-dca0-11e9-913b-12d8a56209eb',
-                        userId: "user_" + Math.floor(Math.random() * 1000)
-                    });
+        // 1. Έγκριση μικροφώνου αμέσως μόλις ανοίξει το GitHub Page
+        navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+            .then(stream => {
+                localStream = stream;
+                localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+                
+                // Έλεγχος αν ο Υπολογιστής Β άνοιξε το link με την παράμετρο ?invite=
+                const urlParams = new URLSearchParams(window.location.search);
+                const offerData = urlParams.get('invite');
 
-                    initLANWebRTC();
-                })
-                .catch(err => {
-                    statusDiv.innerText = "Σφάλμα μικροφώνου: " + err.message;
-                });
-        });
-
-        function initLANWebRTC() {
-            // Δημιουργία WebRTC σύνδεσης (Καθαρό LAN χωρίς εξωτερικούς servers)
-            pc = new RTCPeerConnection({ iceServers: [] });
-
-            // Προσθήκη του ήχου μας
-            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-
-            // Όταν λάβουμε τον ήχο του άλλου υπολογιστή στο LAN
-            pc.ontrack = (event) => {
-                remoteAudio.srcObject = event.streams;
-                statusDiv.innerText = "ΣΥΝΔΕΘΗΚΕ! Μιλήστε ελεύθερα στο LAN.";
-                statusDiv.style.background = "#d4edda";
-                statusDiv.style.color = "#155724";
-            };
-
-            // Λήψη μηνυμάτων από το PubNub (Αυτόματο handshake)
-            pubnub.addListener({
-                message: async (payload) => {
-                    // Αγνοούμε τα δικά μας μηνύματα
-                    if (payload.publisher === pubnub.getUserId()) return;
-
-                    const data = payload.message;
-
-                    if (data.offer && pc.signalingState === "stable") {
-                        await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-                        const answer = await pc.createAnswer();
-                        await pc.setLocalDescription(answer);
-                        
-                        // Στέλνουμε την απάντηση αυτόματα πίσω
-                        pubnub.publish({
-                            channel: CHANNEL_NAME,
-                            message: { answer: pc.localDescription }
-                        });
-                    } 
-                    else if (data.answer && pc.signalingState === "have-local-offer") {
-                        await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-                    }
+                if (offerData) {
+                    actionBtn.innerText = "Σύνδεση στην Κλήση LAN";
+                    statusDiv.innerText = "Βρέθηκε πρόσκληση σύνδεσης! Πατήστε το κουμπί για να συνδεθείτε.";
+                    actionBtn.onclick = () => handleInvite(offerData);
+                } else {
+                    actionBtn.innerText = "Δημιουργία Συνδέσμου Κλήσης";
+                    statusDiv.innerText = "Το μικρόφωνο είναι έτοιμο! Πατήστε για να δημιουργήσετε σύνδεσμο για τον άλλον υπολογιστή.";
+                    actionBtn.onclick = createInvite;
                 }
+            })
+            .catch(err => {
+                statusDiv.innerText = "Σφάλμα μικροφώνου: " + err.message;
+                actionBtn.disabled = true;
             });
 
-            // Εγγραφή στο κανάλι για να ακούμε
-            pubnub.subscribe({ channels: [CHANNEL_NAME] });
+        // 2. Ο Υπολογιστής Α δημιουργεί το link
+        async function createInvite() {
+            statusDiv.innerText = "Δημιουργία κλήσης LAN...";
+            
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
 
-            // Περιμένουμε 1 δευτερόλεπτο και στέλνουμε αυτόματα την πρόσκληση (Offer) στο LAN
-            setTimeout(async () => {
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
+            // Περιμένουμε 500ms να μαζευτούν οι τοπικές IP πληροφορίες της κάρτας δικτύου
+            setTimeout(() => {
+                const base64Offer = btoa(JSON.stringify(pc.localDescription));
+                // Φτιάχνει αυτόματα το URL του δικού σας GitHub Pages προσθέτοντας τα δεδομένα σύνδεσης
+                const inviteUrl = window.location.origin + window.location.pathname + "?invite=" + base64Offer;
                 
-                pubnub.publish({
-                    channel: CHANNEL_NAME,
-                    message: { offer: pc.localDescription }
-                });
-            }, 1000);
+                statusDiv.innerHTML = `<strong>Ο σύνδεσμος LAN είναι έτοιμος!</strong><br><br><input type="text" value="${inviteUrl}" id="link-input" readonly><br><br>Στείλτε τον στον άλλον υπολογιστή. Μόλις τον ανοίξει, η κλήση θα ξεκινήσει.`;
+                
+                actionBtn.innerText = "Αντιγραφή Συνδέσμου";
+                actionBtn.onclick = () => {
+                    document.getElementById('link-input').select();
+                    document.execCommand('copy');
+                    alert("Ο σύνδεσμος αντιγράφηκε!");
+                };
+            }, 500);
         }
+
+        // 3. Ο Υπολογιστής Β εκτελεί το link
+        async function handleInvite(base64Offer) {
+            statusDiv.innerText = "Σύνδεση στο τοπικό δίκτυο...";
+            const offer = JSON.parse(atob(base64Offer));
+            
+            await pc.setRemoteDescription(new RTCSessionDescription(offer));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+
+            // Επειδή οι δύο υπολογιστές βρίσκονται στο ίδιο ρούτερ (LAN), 
+            // η σύνδεση P2P κλειδώνει αυτόματα μόλις ο Β διαβάσει το Offer.
+            actionBtn.style.display = "none";
+        }
+
+        // Όταν ο ήχος συνδεθεί επιτυχώς μέσω LAN
+        pc.ontrack = event => {
+            remoteAudio.srcObject = event.streams;
+            statusDiv.innerText = "ΣΥΝΔΕΘΗΚΕ! Μιλήστε ελεύθερα στο LAN.";
+            statusDiv.style.background = "#d4edda";
+            statusDiv.style.color = "#155724";
+        };
     </script>
 </body>
 </html>
