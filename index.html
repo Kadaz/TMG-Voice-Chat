@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>REAL Voice Chat</title>
+  <title>REAL WebRTC Voice</title>
 </head>
 <body>
 
-<h2>🎤 REAL WebRTC Voice Chat</h2>
+<h2>🎤 WebRTC Voice (FIXED)</h2>
 
-<button id="call">Start Call (Tab 1)</button>
-<button id="join">Join Call (Tab 2)</button>
+<button id="start">Start (Caller)</button>
+<button id="join">Join (Receiver)</button>
 
 <audio id="remoteAudio" autoplay></audio>
 
@@ -33,57 +33,68 @@ const servers = {
 let pc;
 let localStream;
 
-async function setupPeer() {
+/* =====================
+   CREATE PEER
+===================== */
+async function createPeer() {
   pc = new RTCPeerConnection(servers);
 
   localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
   localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 
   pc.ontrack = (event) => {
     document.getElementById("remoteAudio").srcObject = event.streams[0];
   };
 
-  // ICE candidates σωστά (BOTH SIDES)
+  // IMPORTANT: ICE candidates stream (REAL FIX)
   pc.onicecandidate = async (event) => {
     if (event.candidate) {
       await setDoc(doc(db, "call", "candidate"), {
-        candidate: JSON.stringify(event.candidate)
+        c: JSON.stringify(event.candidate)
       });
     }
   };
+
+  // listen for remote ICE
+  onSnapshot(doc(db, "call", "candidate"), async (snap) => {
+    const data = snap.data();
+    if (data?.c && pc) {
+      try {
+        await pc.addIceCandidate(JSON.parse(data.c));
+      } catch (e) {}
+    }
+  });
 }
 
-/* =========================
-   CALLER (Tab 1)
-========================= */
-document.getElementById("call").onclick = async () => {
-  await setupPeer();
+/* =====================
+   CALLER
+===================== */
+document.getElementById("start").onclick = async () => {
+  await createPeer();
 
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
 
   await setDoc(doc(db, "call", "offer"), {
-    offer: JSON.stringify(offer)
+    o: JSON.stringify(offer)
   });
 
-  // wait for answer
   onSnapshot(doc(db, "call", "answer"), async (snap) => {
     const data = snap.data();
-    if (data?.answer && !pc.currentRemoteDescription) {
-      await pc.setRemoteDescription(JSON.parse(data.answer));
+    if (data?.a && !pc.currentRemoteDescription) {
+      await pc.setRemoteDescription(JSON.parse(data.a));
     }
   });
 };
 
-/* =========================
-   JOINER (Tab 2)
-========================= */
+/* =====================
+   JOINER
+===================== */
 document.getElementById("join").onclick = async () => {
-  await setupPeer();
+  await createPeer();
 
   const offerSnap = await getDoc(doc(db, "call", "offer"));
-  const offer = JSON.parse(offerSnap.data().offer);
+  const offer = JSON.parse(offerSnap.data().o);
 
   await pc.setRemoteDescription(offer);
 
@@ -91,7 +102,7 @@ document.getElementById("join").onclick = async () => {
   await pc.setLocalDescription(answer);
 
   await setDoc(doc(db, "call", "answer"), {
-    answer: JSON.stringify(answer)
+    a: JSON.stringify(answer)
   });
 };
 </script>
