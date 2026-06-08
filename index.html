@@ -1,20 +1,18 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Firebase Chat</title>
+  <title>Voice Chat</title>
 </head>
 <body>
 
-<h2>💬 Live Chat</h2>
+<h2>🎤 Simple Voice Chat</h2>
 
-<input id="msg" placeholder="γράψε μήνυμα">
-<button onclick="sendMsg()">Send</button>
-
-<ul id="list"></ul>
+<button id="start">Start Call</button>
+<button id="stop">Stop</button>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js";
-import { getFirestore, collection, addDoc, onSnapshot, query, orderBy } 
+import { getFirestore, doc, setDoc, getDoc, onSnapshot } 
 from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -26,29 +24,49 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-window.sendMsg = async function () {
-  let msg = document.getElementById("msg").value;
+// ICE servers (για connection)
+const servers = {
+  iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+};
 
-  await addDoc(collection(db, "messages"), {
-    text: msg,
-    time: Date.now()
+let pc;
+let localStream;
+
+// START CALL
+document.getElementById("start").onclick = async () => {
+  pc = new RTCPeerConnection(servers);
+
+  localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  await setDoc(doc(db, "calls", "room1"), {
+    offer: JSON.stringify(offer)
   });
 
-  document.getElementById("msg").value = "";
-}
+  pc.onicecandidate = async (event) => {
+    if (event.candidate) {
+      await setDoc(doc(db, "calls", "candidate"), {
+        candidate: JSON.stringify(event.candidate)
+      });
+    }
+  };
 
-const q = query(collection(db, "messages"), orderBy("time"));
-
-onSnapshot(q, (snapshot) => {
-  let list = document.getElementById("list");
-  list.innerHTML = "";
-
-  snapshot.forEach(doc => {
-    let li = document.createElement("li");
-    li.innerText = doc.data().text;
-    list.appendChild(li);
+  onSnapshot(doc(db, "calls", "answer"), (snap) => {
+    if (snap.exists()) {
+      const answer = JSON.parse(snap.data().answer);
+      pc.setRemoteDescription(answer);
+    }
   });
-});
+};
+
+// STOP
+document.getElementById("stop").onclick = () => {
+  if (pc) pc.close();
+  if (localStream) localStream.getTracks().forEach(t => t.stop());
+};
 </script>
 
 </body>
