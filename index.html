@@ -2,96 +2,90 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Voice Chat</title>
+  <title>RAW Voice Chat</title>
 </head>
 <body style="font-family:Arial; text-align:center; padding-top:40px;">
 
 <h2>🎧 Voice Chat</h2>
 
 <input id="room" placeholder="Room ID" />
-<button onclick="join()">Join</button>
+<button onclick="start()">Start</button>
 
 <p id="status">idle</p>
 
-<audio id="audio" autoplay></audio>
-
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
-
-const firebaseConfig = {
-  apiKey: "demo",
-  databaseURL: "https://webrtc-demo-default-rtdb.firebaseio.com"
-};
-
-const app = initializeApp(firebaseConfig);
-const db = getDatabase(app);
-
+<script>
 let pc;
-let roomId;
+let localStream;
+let channel;
 
 const config = {
-  iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" }
+  ]
 };
 
-async function join() {
-  roomId = document.getElementById("room").value;
-  if (!roomId) return;
+async function start() {
+  const room = document.getElementById("room").value;
+  if (!room) return;
 
-  document.getElementById("status").innerText = "connecting...";
+  document.getElementById("status").innerText = "starting mic...";
 
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
   pc = new RTCPeerConnection(config);
 
-  stream.getTracks().forEach(t => pc.addTrack(t, stream));
+  localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
 
   pc.ontrack = (e) => {
-    document.getElementById("audio").srcObject = e.streams[0];
+    const audio = document.createElement("audio");
+    audio.srcObject = e.streams[0];
+    audio.autoplay = true;
+    document.body.appendChild(audio);
   };
-
-  const roomRef = ref(db, "rooms/" + roomId);
 
   pc.onicecandidate = (e) => {
     if (e.candidate) {
-      set(ref(db, "rooms/" + roomId + "/candidate"), JSON.stringify(e.candidate));
+      channel.postMessage({ type: "ice", data: e.candidate });
     }
   };
 
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
+  channel = new BroadcastChannel("voice_" + room);
 
-  set(ref(db, "rooms/" + roomId + "/offer"), JSON.stringify(offer));
+  channel.onmessage = async (msg) => {
+    const data = msg.data;
 
-  onValue(roomRef, async (snap) => {
-    const data = snap.val();
-    if (!data) return;
+    if (data.type === "offer") {
+      await pc.setRemoteDescription(data.offer);
 
-    if (data.answer && !pc.currentRemoteDescription) {
-      await pc.setRemoteDescription(JSON.parse(data.answer));
-      document.getElementById("status").innerText = "connected";
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      channel.postMessage({ type: "answer", answer });
     }
 
-    if (data.candidate) {
+    if (data.type === "answer") {
+      await pc.setRemoteDescription(data.answer);
+    }
+
+    if (data.type === "ice") {
       try {
-        await pc.addIceCandidate(JSON.parse(data.candidate));
+        await pc.addIceCandidate(data.data);
       } catch {}
     }
-  });
+  };
 
-  onValue(ref(db, "rooms/" + roomId + "/offer"), async (snap) => {
-    const offer = snap.val();
-    if (!offer || pc.currentRemoteDescription) return;
+  // decide caller/receiver automatically
+  const isCaller = Math.random() > 0.5;
 
-    await pc.setRemoteDescription(JSON.parse(offer));
+  if (isCaller) {
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
 
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-
-    set(ref(db, "rooms/" + roomId + "/answer"), JSON.stringify(answer));
-  });
-
-  document.getElementById("status").innerText = "ready";
+    channel.postMessage({ type: "offer", offer });
+    document.getElementById("status").innerText = "calling...";
+  } else {
+    document.getElementById("status").innerText = "waiting...";
+  }
 }
 </script>
 
