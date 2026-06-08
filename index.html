@@ -2,63 +2,84 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Simple Voice Chat</title>
+  <title>Simple Voice Chat FIX</title>
 </head>
 <body style="font-family: Arial; text-align:center; padding-top:50px;">
 
-  <h2>🎧 Voice Chat</h2>
+<h2>🎧 Simple Voice Chat</h2>
 
-  <input id="room" placeholder="Room ID (πχ: test123)" />
-  <button onclick="join()">Join</button>
+<input id="room" placeholder="Room ID (πχ: test123)" />
+<button onclick="join()">Join</button>
 
-  <p id="status">Not connected</p>
+<p id="status">Disconnected</p>
 
-  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 
-  <script>
-    let peer;
-    let call;
+<script>
+let peer;
+let localStream;
+let currentCall;
+let connections = [];
 
-    async function join() {
-      const roomId = document.getElementById("room").value;
+async function join() {
+  const roomId = document.getElementById("room").value;
+  if (!roomId) return alert("Βάλε Room ID");
 
-      if (!roomId) return alert("Βάλε Room ID");
+  localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  peer = new Peer(undefined, {
+    host: "0.peerjs.com",
+    port: 443,
+    secure: true
+  });
 
-      peer = new Peer(roomId, {
-        host: "0.peerjs.com",
-        port: 443,
-        secure: true
-      });
+  peer.on('open', id => {
+    document.getElementById("status").innerText = "Connected: " + id;
 
-      peer.on('open', () => {
-        document.getElementById("status").innerText = "Connected as " + roomId;
-      });
+    // connect to "room hub"
+    const conn = peer.connect(roomId);
+    connections.push(conn);
 
-      peer.on('call', incoming => {
-        incoming.answer(stream);
-        incoming.on('stream', remoteStream => {
-          playAudio(remoteStream);
-        });
-      });
+    conn.on('open', () => {
+      conn.send({ type: "join", id: peer.id });
+    });
+  });
 
-      setTimeout(() => {
-        const conn = peer.connect(roomId);
-        call = peer.call(roomId, stream);
+  // incoming calls
+  peer.on('call', call => {
+    call.answer(localStream);
+    call.on('stream', remoteStream => {
+      play(remoteStream);
+    });
+  });
 
-        call.on('stream', remoteStream => {
-          playAudio(remoteStream);
-        });
-      }, 1500);
-    }
+  // incoming data (room logic)
+  peer.on('connection', conn => {
+    conn.on('data', data => {
+      if (data.type === "join") {
+        callPeer(data.id);
+      }
+    });
+  });
+}
 
-    function playAudio(stream) {
-      const audio = document.createElement("audio");
-      audio.srcObject = stream;
-      audio.play();
-    }
-  </script>
+function callPeer(id) {
+  if (id === peer.id) return;
+
+  const call = peer.call(id, localStream);
+
+  call.on('stream', remoteStream => {
+    play(remoteStream);
+  });
+}
+
+function play(stream) {
+  const audio = document.createElement("audio");
+  audio.srcObject = stream;
+  audio.autoplay = true;
+  document.body.appendChild(audio);
+}
+</script>
 
 </body>
 </html>
