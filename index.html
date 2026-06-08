@@ -1,37 +1,111 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Mic Test</title>
+  <title>2P Voice Chat</title>
 </head>
 <body>
 
-<h2>🎤 Mic Test (Start / Leave)</h2>
+<h2>🎤 2 Player Voice Chat</h2>
 
-<button id="start">Start Mic</button>
-<button id="stop">Leave Voice</button>
+<input id="room" placeholder="room name (π.χ. test123)">
+<button id="join">Join Voice Room</button>
+<button id="leave">Leave</button>
 
-<audio id="audio" autoplay></audio>
+<audio id="remoteAudio" autoplay></audio>
 
-<script>
-let stream;
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js";
+import { getFirestore, doc, setDoc, getDoc, onSnapshot, deleteDoc } 
+from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
 
-document.getElementById("start").onclick = async () => {
-  stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-  document.getElementById("audio").srcObject = stream;
-
-  alert("Mic is ON");
+const firebaseConfig = {
+  apiKey: "AIzaSyBBQDKV4YiwW8CBlxSXwgV6ppGuvC_mLPs",
+  authDomain: "tmg-voice-chat.firebaseapp.com",
+  projectId: "tmg-voice-chat"
 };
 
-document.getElementById("stop").onclick = () => {
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+const servers = {
+  iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+};
+
+let pc;
+let stream;
+
+async function createPeer(room) {
+  pc = new RTCPeerConnection(servers);
+
+  stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+  stream.getTracks().forEach(t => pc.addTrack(t, stream));
+
+  pc.ontrack = (event) => {
+    document.getElementById("remoteAudio").srcObject = event.streams[0];
+  };
+
+  pc.onicecandidate = async (e) => {
+    if (e.candidate) {
+      await setDoc(doc(db, "rooms", room, "candidates", "c1"), {
+        c: JSON.stringify(e.candidate)
+      });
+    }
+  };
+}
+
+document.getElementById("join").onclick = async () => {
+  const room = document.getElementById("room").value;
+
+  await createPeer(room);
+
+  const roomRef = doc(db, "rooms", room);
+  const snap = await getDoc(roomRef);
+
+  // 🟢 HOST
+  if (!snap.exists()) {
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    await setDoc(roomRef, {
+      offer: JSON.stringify(offer)
+    });
+
+    onSnapshot(roomRef, async (docSnap) => {
+      const data = docSnap.data();
+      if (data?.answer && !pc.currentRemoteDescription) {
+        await pc.setRemoteDescription(JSON.parse(data.answer));
+      }
+    });
+
+  } 
+  // 🟡 JOINER
+  else {
+    const offer = JSON.parse(snap.data().offer);
+
+    await pc.setRemoteDescription(offer);
+
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+
+    await setDoc(roomRef, {
+      offer: snap.data().offer,
+      answer: JSON.stringify(answer)
+    });
+  }
+};
+
+/* ================= LEAVE ================= */
+document.getElementById("leave").onclick = async () => {
+  if (pc) pc.close();
+
   if (stream) {
-    stream.getTracks().forEach(track => track.stop());
-    stream = null;
+    stream.getTracks().forEach(t => t.stop());
   }
 
-  document.getElementById("audio").srcObject = null;
+  document.getElementById("remoteAudio").srcObject = null;
 
-  alert("You left voice chat");
+  alert("Left voice room");
 };
 </script>
 
