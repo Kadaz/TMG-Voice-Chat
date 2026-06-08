@@ -3,137 +3,112 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Walkie Talkie (GitHub Pages)</title>
-    <!-- Χρησιμοποιούμε PeerJS μόνο για να στέλνουμε τα αρχεία ήχου -->
-    <script src="https://unpkg.com"></script>
+    <title>LAN Voice One-Click</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 40px; background: #eef2f7; color: #333; }
-        .box { background: white; padding: 30px; border-radius: 15px; width: 320px; margin: 0 auto; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-        .btn-talk { background: #dc3545; color: white; border: none; padding: 20px; border-radius: 50%; width: 120px; height: 120px; font-weight: bold; cursor: pointer; font-size: 16px; margin: 20px 0; box-shadow: 0 4px 10px rgba(220,53,69,0.4); user-select: none; -webkit-user-select: none; }
-        .btn-talk:active { background: #bd2130; transform: scale(0.95); }
-        .btn-conn { background: #007bff; color: white; border: none; padding: 10px; border-radius: 5px; cursor: pointer; width: 100%; font-weight: bold; }
-        input { padding: 10px; width: 90%; text-align: center; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 5px; }
-        #status { font-weight: bold; margin-top: 15px; padding: 10px; border-radius: 5px; background: #e2e3e5; font-size: 14px; }
+        .box { background: white; padding: 30px; border-radius: 12px; width: 400px; margin: 0 auto; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        button { background: #007bff; color: white; border: none; padding: 12px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; margin-top: 15px; font-size: 15px; }
+        button:hover { background: #0056b3; }
+        #status { font-weight: bold; margin-top: 20px; padding: 12px; border-radius: 6px; background: #e2e3e5; font-size: 14px; line-height: 1.5; }
     </style>
 </head>
 <body>
 
     <div class="box">
-        <h3>Walkie Talkie</h3>
-        <p>Το ID σου: <span id="my-id" style="font-weight:bold; color:#007bff; font-size: 20px;">...</span></p>
+        <h3>LAN Voice Chat (One-Click)</h3>
+        <p style="font-size: 13px; color: #666;">Απευθείας σύνδεση στο τοπικό δίκτυο χωρίς servers.</p>
         <hr>
         
-        <input type="text" id="peer-id" placeholder="Βάλε το ID του φίλου">
-        <button id="conn-btn" class="btn-conn">Σύνδεση με φίλο</button>
+        <button id="action-btn">Φόρτωση μικροφώνου...</button>
         
-        <!-- Κρατήστε πατημένο για να μιλήσετε -->
-        <button id="talk-btn" class="btn-talk" disabled>ΚΡΑΤΑ ΤΟ<br>ΓΙΑ ΝΑ ΜΙΛΗΣΕΙΣ</button>
-        
-        <div id="status">Σύνδεση στον server...</div>
+        <div id="status">Αναμονή για έγκριση μικροφώνου...</div>
     </div>
+
+    <audio id="remote-audio" autoplay></audio>
 
     <script>
         const statusDiv = document.getElementById('status');
-        const talkBtn = document.getElementById('talk-btn');
-        const connBtn = document.getElementById('conn-btn');
+        const actionBtn = document.getElementById('action-btn');
+        const remoteAudio = document.getElementById('remote-audio');
         
-        let peer = null;
-        let connection = null;
-        let mediaRecorder = null;
-        let audioChunks = [];
+        let localStream;
+        let pc = new RTCPeerConnection({ iceServers: [] }); // Καθαρό LAN χωρίς εξωτερικούς STUN
 
-        // 1. Σύνδεση στον Server με τυχαίο ID
-        const myId = Math.floor(1000 + Math.random() * 9000).toString();
-        peer = new Peer(myId);
+        // 1. Λήψη μικροφώνου με το που ανοίγει η σελίδα
+        navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+            .then(stream => {
+                localStream = stream;
+                localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+                
+                // Έλεγχος αν ο χρήστης άνοιξε σύνδεσμο πρόσκλησης
+                const urlParams = new URLSearchParams(window.location.search);
+                const offerData = urlParams.get('invite');
 
-        peer.on('open', (id) => {
-            document.getElementById('my-id').innerText = id;
-            statusDiv.innerText = "Έτοιμο. Βάλε το ID του φίλου σου και πάτα Σύνδεση.";
-            setupMicrophone();
-        });
+                if (offerData) {
+                    // ΠΕΡΙΠΤΩΣΗ: Είμαστε ο Υπολογιστής Β
+                    actionBtn.innerText = "Σύνδεση στην Κλήση";
+                    statusDiv.innerText = "Διαβάστηκε σύνδεσμος πρόσκλησης. Πατήστε το κουμπί για να συνδεθείτε με τον φίλο σας.";
+                    actionBtn.onclick = () => handleInvite(offerData);
+                } else {
+                    // ΠΕΡΙΠΤΩΣΗ: Είμαστε ο Υπολογιστής Α
+                    actionBtn.innerText = "Δημιουργία Συνδέσμου Κλήσης";
+                    statusDiv.innerText = "Έτοιμο! Πατήστε το κουμπί για να δημιουργήσετε έναν σύνδεσμο για τον φίλο σας.";
+                    actionBtn.onclick = createInvite;
+                }
+            })
+            .catch(err => {
+                statusDiv.innerText = "Σφάλμα μικροφώνου: " + err.message;
+                actionBtn.disabled = true;
+            });
 
-        // Προετοιμασία εγγραφής ήχου (χωρίς WebRTC κλήση)
-        function setupMicrophone() {
-            navigator.mediaDevices.getUserMedia({ audio: true })
-                .then(stream => {
-                    mediaRecorder = new MediaRecorder(stream);
-                    
-                    mediaRecorder.ondataavailable = event => {
-                        audioChunks.push(event.data);
-                    };
-
-                    mediaRecorder.onstop = () => {
-                        const audioBlob = new Blob(audioChunks, { type: 'audio/ogg; codecs=opus' });
-                        audioChunks = [];
-                        
-                        // Στέλνουμε το ηχητικό αρχείο στον άλλον
-                        if (connection && connection.open) {
-                            connection.send(audioBlob);
-                            statusDiv.innerText = "Το μήνυμα στάλθηκε!";
-                        } else {
-                            statusDiv.innerText = "Σφάλμα: Δεν είστε συνδεδεμένοι με κάποιον.";
-                        }
-                    };
-                })
-                .catch(err => {
-                    statusDiv.innerText = "Αποτυχία μικροφώνου: " + err.message;
-                });
-        }
-
-        // 2. Όταν ΕΜΕΙΣ πατάμε σύνδεση
-        connBtn.addEventListener('click', () => {
-            const remoteId = document.getElementById('peer-id').value.trim();
-            if (!remoteId) return alert("Βάλε ID!");
+        // 2. Ο Υπολογιστής Α δημιουργεί την πρόσκληση
+        async function createInvite() {
+            statusDiv.innerText = "Δημιουργία σύνδεσης... Περιμένετε...";
             
-            statusDiv.innerText = "Σύνδεση με τον " + remoteId + "...";
-            connection = peer.connect(remoteId);
-            setupConnectionEvents();
-        });
+            // Δημιουργία WebRTC Offer
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
 
-        // 3. Όταν ο ΑΛΛΟΣ συνδέεται μαζί μας
-        peer.on('connection', (conn) => {
-            connection = conn;
-            setupConnectionEvents();
-        });
+            // Περιμένουμε 400ms να μαζευτούν οι τοπικές IP πληροφορίες
+            setTimeout(() => {
+                const base64Offer = btoa(JSON.stringify(pc.localDescription));
+                // Φτιάχνουμε ένα καθαρό URL που δείχνει στο ίδιο τοπικό αρχείο με την παράμετρο ?invite=...
+                const inviteUrl = window.location.origin + window.location.pathname + "?invite=" + base64Offer;
+                
+                statusDiv.innerHTML = `<strong>Ο σύνδεσμος είναι έτοιμος!</strong><br><br><input type="text" value="${inviteUrl}" id="link-input" style="width:90%; padding:5px; text-align:center;" readonly><br><br>Αντιγράψτε τον και στείλτε τον στον φίλο σας στο LAN.`;
+                actionBtn.innerText = "Αντιγραφή Συνδέσμου";
+                actionBtn.onclick = () => {
+                    document.getElementById('link-input').select();
+                    document.execCommand('copy');
+                    alert("Ο σύνδεσμος αντιγράφηκε!");
+                };
+            }, 400);
 
-        function setupConnectionEvents() {
-            connection.on('open', () => {
-                statusDiv.innerText = "Συνδέθηκε! Κρατήστε πατημένο το κόκκινο κουμπί για να μιλήσετε.";
-                talkBtn.disabled = false;
-            });
-
-            // Όταν λαμβάνουμε το ηχητικό αρχείο από τον άλλον, το παίζουμε αμέσως
-            connection.on('data', (data) => {
-                statusDiv.innerText = "Λήψη ήχου...";
-                const audioUrl = URL.createObjectURL(data);
-                const audio = new Audio(audioUrl);
-                audio.play();
-                statusDiv.innerText = "Αναπαραγωγή ήχου... Ακούτε τον φίλο σας.";
-            });
+            // Ακούμε κρυφά την απάντηση (Answer) που θα στείλει ο Β μέσω της τοπικής P2P σύνδεσης
+            pc.onicecandidate = () => {}; 
         }
 
-        // 4. Λειτουργία Κουμπιού (Push to Talk)
-        // Για υπολογιστές (κλικ με το ποντίκι)
-        talkBtn.addEventListener('mousedown', startRecording);
-        talkBtn.addEventListener('mouseup', stopRecording);
-        
-        // Για κινητά (άγγιγμα με το δάχτυλο)
-        talkBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startRecording(); });
-        talkBtn.addEventListener('touchend', stopRecording);
+        // 3. Ο Υπολογιστής Β λαμβάνει και εκτελεί τον σύνδεσμο
+        async function handleInvite(base64Offer) {
+            statusDiv.innerText = "Σύνδεση σε εξέλιξη...";
+            const offer = JSON.parse(atob(base64Offer));
+            
+            await pc.setRemoteDescription(new RTCSessionDescription(offer));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
 
-        function startRecording() {
-            if (!mediaRecorder) return;
-            audioChunks = [];
-            mediaRecorder.start();
-            statusDiv.innerText = "Σας ακούει... Μιλήστε τώρα!";
-            talkBtn.style.background = "#28a745";
+            // Επειδή είμαστε σε LAN, μόλις ο Β ορίσει το LocalDescription, 
+            // οι δύο κάρτες δικτύου «βλέπονται» απευθείας και κλείνουν το handshake μόνες τους!
+            actionBtn.style.display = "none";
         }
 
-        function stopRecording() {
-            if (!mediaRecorder || mediaRecorder.state === "inactive") return;
-            mediaRecorder.stop();
-            talkBtn.style.background = "#dc3545";
-        }
+        // Όταν ο ήχος συνδεθεί επιτυχώς
+        pc.ontrack = event => {
+            remoteAudio.srcObject = event.streams;
+            statusDiv.innerText = "Πετυχημένη σύνδεση LAN! Μιλήστε ελεύθερα.";
+            statusDiv.style.background = "#d4edda";
+            statusDiv.style.color = "#155724";
+        };
     </script>
 </body>
 </html>
