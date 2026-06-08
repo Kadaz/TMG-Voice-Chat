@@ -3,112 +3,124 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LAN Voice One-Click</title>
+    <title>Auto Voice Chat (GitHub Pages)</title>
+    <!-- Εισαγωγή της GunDB για αυτόματο handshake χωρίς δικό μας server -->
+    <script src="https://jsdelivr.net"></script>
     <style>
-        body { font-family: sans-serif; text-align: center; padding: 40px; background: #eef2f7; color: #333; }
-        .box { background: white; padding: 30px; border-radius: 12px; width: 400px; margin: 0 auto; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-        button { background: #007bff; color: white; border: none; padding: 12px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; margin-top: 15px; font-size: 15px; }
-        button:hover { background: #0056b3; }
-        #status { font-weight: bold; margin-top: 20px; padding: 12px; border-radius: 6px; background: #e2e3e5; font-size: 14px; line-height: 1.5; }
+        body { font-family: sans-serif; text-align: center; padding: 40px; background: #f0f2f5; color: #333; }
+        .box { background: white; padding: 30px; border-radius: 12px; width: 340px; margin: 0 auto; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        button { background: #28a745; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; width: 100%; font-weight: bold; font-size: 16px; margin-top: 15px; }
+        button:hover { background: #218838; }
+        #status { font-weight: bold; margin-top: 20px; padding: 10px; border-radius: 6px; background: #e2e3e5; font-size: 14px; }
     </style>
 </head>
 <body>
 
     <div class="box">
-        <h3>LAN Voice Chat (One-Click)</h3>
-        <p style="font-size: 13px; color: #666;">Απευθείας σύνδεση στο τοπικό δίκτυο χωρίς servers.</p>
+        <h3>Auto Voice Chat</h3>
+        <p style="font-size: 13px; color: #666;">Η κλήση θα ξεκινήσει αυτόματα μόλις μπείτε στο ίδιο δωμάτιο.</p>
         <hr>
         
-        <button id="action-btn">Φόρτωση μικροφώνου...</button>
+        <button id="start-btn">1. Ενεργοποίηση Μικροφώνου</button>
         
-        <div id="status">Αναμονή για έγκριση μικροφώνου...</div>
+        <div id="status">Πατήστε το πράσινο κουμπί για να ξεκινήσετε.</div>
     </div>
 
+    <!-- Κρυφό στοιχείο για τον ήχο του άλλου -->
     <audio id="remote-audio" autoplay></audio>
 
     <script>
+        const startBtn = document.getElementById('start-btn');
         const statusDiv = document.getElementById('status');
-        const actionBtn = document.getElementById('action-btn');
         const remoteAudio = document.getElementById('remote-audio');
-        
-        let localStream;
-        let pc = new RTCPeerConnection({ iceServers: [] }); // Καθαρό LAN χωρίς εξωτερικούς STUN
 
-        // 1. Λήψη μικροφώνου με το που ανοίγει η σελίδα
-        navigator.mediaDevices.getUserMedia({ audio: true, video: false })
-            .then(stream => {
-                localStream = stream;
-                localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-                
-                // Έλεγχος αν ο χρήστης άνοιξε σύνδεσμο πρόσκλησης
-                const urlParams = new URLSearchParams(window.location.search);
-                const offerData = urlParams.get('invite');
+        let localStream = null;
+        let pc = null;
+        let gun = null;
+        let room = null;
 
-                if (offerData) {
-                    // ΠΕΡΙΠΤΩΣΗ: Είμαστε ο Υπολογιστής Β
-                    actionBtn.innerText = "Σύνδεση στην Κλήση";
-                    statusDiv.innerText = "Διαβάστηκε σύνδεσμος πρόσκλησης. Πατήστε το κουμπί για να συνδεθείτε με τον φίλο σας.";
-                    actionBtn.onclick = () => handleInvite(offerData);
-                } else {
-                    // ΠΕΡΙΠΤΩΣΗ: Είμαστε ο Υπολογιστής Α
-                    actionBtn.innerText = "Δημιουργία Συνδέσμου Κλήσης";
-                    statusDiv.innerText = "Έτοιμο! Πατήστε το κουμπί για να δημιουργήσετε έναν σύνδεσμο για τον φίλο σας.";
-                    actionBtn.onclick = createInvite;
-                }
-            })
-            .catch(err => {
-                statusDiv.innerText = "Σφάλμα μικροφώνου: " + err.message;
-                actionBtn.disabled = true;
+        // Δημιουργούμε ένα σταθερό όνομα δωματίου. 
+        // Αν θέλετε άλλο δωμάτιο, απλά αλλάξτε αυτή τη λέξη.
+        const roomName = "greece-voice-room-123"; 
+
+        startBtn.addEventListener('click', () => {
+            statusDiv.innerText = "Ανοιγμα μικροφώνου... Πατήστε Αποδοχή.";
+            
+            navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+                .then(stream => {
+                    localStream = stream;
+                    startBtn.style.display = 'none';
+                    statusDiv.innerText = "Σύνδεση στο δίκτυο... Παρακαλώ περιμένετε...";
+                    
+                    // Σύνδεση στους δωρεάν δημόσιους servers της GunDB
+                    gun = Gun(['https://herokuapp.com']);
+                    room = gun.get(roomName);
+
+                    initWebRTC();
+                })
+                .catch(err => {
+                    statusDiv.innerText = "Σφάλμα μικροφώνου: " + err.message;
+                });
+        });
+
+        function initWebRTC() {
+            // Καθαρή σύνδεση WebRTC με δωρεάν STUN της Google
+            pc = new RTCPeerConnection({
+                iceServers: [{ urls: 'stun:://google.com' }]
             });
 
-        // 2. Ο Υπολογιστής Α δημιουργεί την πρόσκληση
-        async function createInvite() {
-            statusDiv.innerText = "Δημιουργία σύνδεσης... Περιμένετε...";
+            // Προσθήκη του ήχου μας
+            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+            // Όταν έρθει ο ήχος του άλλου
+            pc.ontrack = (event) => {
+                remoteAudio.srcObject = event.streams[0];
+                statusDiv.innerText = "Συνδέθηκε! Μιλήστε ελεύθερα.";
+                statusDiv.style.background = "#d4edda";
+                statusDiv.style.color = "#155724";
+            };
+
+            // Αυτόματη αποστολή δικτυακών στοιχείων (ICE Candidates)
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    room.get('ice').put(JSON.stringify(event.candidate));
+                }
+            };
+
+            // Ακούμε αν ο άλλος υπολογιστής έστειλε Πρόσκληση (Offer) ή Απάντηση (Answer)
+            room.on((data) => {
+                if (!data) return;
+
+                if (data.offer && pc.signalingState === "stable") {
+                    const offer = JSON.parse(data.offer);
+                    pc.setRemoteDescription(new RTCSessionDescription(offer))
+                        .then(() => pc.createAnswer())
+                        .then(answer => pc.setLocalDescription(answer))
+                        .then(() => {
+                            room.get('answer').put(JSON.stringify(pc.localDescription));
+                        });
+                }
+
+                if (data.answer && pc.signalingState === "have-local-offer") {
+                    const answer = JSON.parse(data.answer);
+                    pc.setRemoteDescription(new RTCSessionDescription(answer));
+                }
+
+                if (data.ice) {
+                    const candidate = JSON.parse(data.ice);
+                    pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => {});
+                }
+            });
+
+            // Ο πρώτος που μπαίνει δημιουργεί αυτόματα την πρόσκληση (Offer)
+            statusDiv.innerText = "Αναμονή για τον φίλο σας... (Μόλις μπει, θα συνδεθεί μόνο του)";
             
-            // Δημιουργία WebRTC Offer
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-
-            // Περιμένουμε 400ms να μαζευτούν οι τοπικές IP πληροφορίες
-            setTimeout(() => {
-                const base64Offer = btoa(JSON.stringify(pc.localDescription));
-                // Φτιάχνουμε ένα καθαρό URL που δείχνει στο ίδιο τοπικό αρχείο με την παράμετρο ?invite=...
-                const inviteUrl = window.location.origin + window.location.pathname + "?invite=" + base64Offer;
-                
-                statusDiv.innerHTML = `<strong>Ο σύνδεσμος είναι έτοιμος!</strong><br><br><input type="text" value="${inviteUrl}" id="link-input" style="width:90%; padding:5px; text-align:center;" readonly><br><br>Αντιγράψτε τον και στείλτε τον στον φίλο σας στο LAN.`;
-                actionBtn.innerText = "Αντιγραφή Συνδέσμου";
-                actionBtn.onclick = () => {
-                    document.getElementById('link-input').select();
-                    document.execCommand('copy');
-                    alert("Ο σύνδεσμος αντιγράφηκε!");
-                };
-            }, 400);
-
-            // Ακούμε κρυφά την απάντηση (Answer) που θα στείλει ο Β μέσω της τοπικής P2P σύνδεσης
-            pc.onicecandidate = () => {}; 
+            pc.createOffer()
+                .then(offer => pc.setLocalDescription(offer))
+                .then(() => {
+                    room.get('offer').put(JSON.stringify(pc.localDescription));
+                });
         }
-
-        // 3. Ο Υπολογιστής Β λαμβάνει και εκτελεί τον σύνδεσμο
-        async function handleInvite(base64Offer) {
-            statusDiv.innerText = "Σύνδεση σε εξέλιξη...";
-            const offer = JSON.parse(atob(base64Offer));
-            
-            await pc.setRemoteDescription(new RTCSessionDescription(offer));
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-
-            // Επειδή είμαστε σε LAN, μόλις ο Β ορίσει το LocalDescription, 
-            // οι δύο κάρτες δικτύου «βλέπονται» απευθείας και κλείνουν το handshake μόνες τους!
-            actionBtn.style.display = "none";
-        }
-
-        // Όταν ο ήχος συνδεθεί επιτυχώς
-        pc.ontrack = event => {
-            remoteAudio.srcObject = event.streams;
-            statusDiv.innerText = "Πετυχημένη σύνδεση LAN! Μιλήστε ελεύθερα.";
-            statusDiv.style.background = "#d4edda";
-            statusDiv.style.color = "#155724";
-        };
     </script>
 </body>
 </html>
