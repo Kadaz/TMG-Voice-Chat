@@ -3,110 +3,164 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Instant Serverless Voice Chat</title>
-    <!-- Εισαγωγή της Bugout βιβλιοθήκης για αυτόματη σύνδεση χωρίς server -->
+    <title>Production Serverless Voice Chat</title>
+    <!-- Injected styling & QR Generator Library (Zero terminal installation) -->
     <script src="https://jsdelivr.net"></script>
     <style>
-        body { font-family: sans-serif; text-align: center; padding: 40px; background: #eef2f7; color: #333; }
-        .box { background: white; padding: 30px; border-radius: 12px; width: 340px; margin: 0 auto; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-        button { background: #28a745; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; width: 100%; font-weight: bold; font-size: 16px; margin-top: 15px; }
-        button:hover { background: #218838; }
-        #status { font-weight: bold; margin-top: 20px; padding: 10px; border-radius: 6px; background: #e2e3e5; font-size: 14px; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #f8fafc; text-align: center; padding: 20px; margin: 0; }
+        .wrapper { max-width: 500px; margin: 30px auto; background: #1e293b; padding: 30px; border-radius: 16px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3); border: 1px solid #334155; }
+        h2 { margin-top: 0; color: #38bdf8; }
+        .status { padding: 12px; border-radius: 8px; font-weight: bold; background: #334155; margin-bottom: 20px; font-size: 14px; border-left: 4px solid #e2e8f0; }
+        textarea { width: 100%; height: 90px; background: #0f172a; color: #38bdf8; border: 1px solid #475569; border-radius: 8px; padding: 10px; font-family: monospace; font-size: 11px; box-sizing: border-box; resize: none; margin-bottom: 10px; }
+        button { background: #0284c7; color: white; border: none; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; width: 100%; margin: 5px 0; font-size: 14px; transition: background 0.2s; }
+        button:hover { background: #0369a1; }
+        .secondary-btn { background: #22c55e; }
+        .secondary-btn:hover { background: #16a34a; }
+        #canvas-container { margin: 15px 0; display: inline-block; background: white; padding: 10px; border-radius: 8px; display: none; }
+        hr { border: 0; border-top: 1px solid #334155; margin: 20px 0; }
     </style>
 </head>
 <body>
 
-    <div class="box">
-        <h3>Instant Voice Chat</h3>
-        <p style="font-size: 13px; color: #666;">Ανοίξτε και οι δύο το ίδιο link στο GitHub Pages.</p>
+    <div class="wrapper">
+        <h2>P2P LAN/Cloud Voice Chat</h2>
+        <div id="status-panel" class="status">Initialising system audio...</div>
+
+        <!-- STEP 1: HOST GENERATION -->
+        <div id="host-section">
+            <p style="font-size: 13px; color: #94a3b8; text-align: left; margin: 0 0 10px 0;"><strong>HOST (User A):</strong> Click below to generate a direct audio link.</p>
+            <button id="init-host-btn">1. Generate Voice Invite</button>
+            <div id="canvas-container"><canvas id="qrcode"></canvas></div>
+        </div>
+
         <hr>
-        
-        <button id="start-btn">Ενεργοποίηση Μικροφώνου</button>
-        
-        <div id="status">Πατήστε το κουμπί για να ξεκινήσετε.</div>
+
+        <!-- STEP 2: PEER HANDSHAKE -->
+        <div id="join-section">
+            <p style="font-size: 13px; color: #94a3b8; text-align: left; margin: 0 0 10px 0;"><strong>PEER (User B):</strong> Paste your friend's connection string below, or accept an incoming response.</p>
+            <textarea id="sdp-transfer-box" placeholder="Paste the handshake string here..."></textarea>
+            <button id="process-sdp-btn" class="secondary-btn">2. Accept & Process Connection</button>
+        </div>
     </div>
 
-    <audio id="remote-audio" autoplay></audio>
+    <!-- Live Hardware Playback Stream Container -->
+    <audio id="network-audio-render" autoplay></audio>
 
     <script>
-        const startBtn = document.getElementById('start-btn');
-        const statusDiv = document.getElementById('status');
-        const remoteAudio = document.getElementById('remote-audio');
+        const statusPanel = document.getElementById('status-panel');
+        const sdpBox = document.getElementById('sdp-transfer-box');
+        const audioDom = document.getElementById('network-audio-render');
+        
+        let localMicStream = null;
+        let rtcPeer = null;
 
-        let localStream = null;
-        let pc = null;
-        let bgt = null;
+        // Force explicit initialization mapping for STUN bypass (works flawlessly over raw LAN)
+        const webRtcConfig = { iceServers: [{ urls: 'stun:://google.com' }] };
 
-        // Ένα κοινό "κλειδί δωματίου" για να βρεθείτε. 
-        // Αν θέλετε να είστε μόνοι σας, αλλάξτε απλά αυτή τη λέξη.
-        const roomToken = "github-voice-room-shared-token-123";
+        // Auto-request local microphone access on load
+        navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+            .then(stream => {
+                localMicStream = stream;
+                updateStatus("Microphone Ready! System primed.", "#22c55e");
+            })
+            .catch(err => {
+                updateStatus("Error: Access to microphone denied! Ensure HTTPS or Localhost.", "#ef4444");
+                console.error(err);
+            });
 
-        startBtn.addEventListener('click', () => {
-            statusDiv.innerText = "Άνοιγμα μικροφώνου...";
+        function updateStatus(text, color = "#e2e8f0") {
+            statusPanel.innerText = text;
+            statusPanel.style.borderLeftColor = color;
+        }
+
+        function createCorePeerConnection() {
+            rtcPeer = new RTCPeerConnection(webRtcConfig);
             
-            navigator.mediaDevices.getUserMedia({ audio: true, video: false })
-                .then(stream => {
-                    localStream = stream;
-                    startBtn.style.display = 'none';
-                    statusDiv.innerText = "Σύνδεση στο δίκτυο... Παρακαλώ περιμένετε...";
-                    
-                    // Σύνδεση στο Serverless δίκτυο
-                    bgt = new Bugout(roomToken);
-                    initWebRTC();
-                })
-                .catch(err => {
-                    statusDiv.innerText = "Σφάλμα μικροφώνου: " + err.message;
+            // Map physical mic tracks directly into WebRTC engine pipelines
+            localMicStream.getTracks().forEach(track => rtcPeer.addTrack(track, localMicStream));
+
+            // Remote audio listener binding execution
+            rtcPeer.ontrack = (event) => {
+                if (event.streams && event.streams[0]) {
+                    audioDom.srcObject = event.streams[0];
+                    updateStatus("CONNECTED LIVE! Speak freely.", "#22c55e");
+                }
+            };
+        }
+
+        // ================= USER A: GENERATE INVITATION =================
+        document.getElementById('init-host-btn').addEventListener('click', async () => {
+            if (!localMicStream) return alert("Microphone channel is not active!");
+            updateStatus("Generating Network Handshake Profile...", "#38bdf8");
+            
+            createCorePeerConnection();
+
+            const sessionOffer = await rtcPeer.createOffer();
+            await rtcPeer.setLocalDescription(sessionOffer);
+
+            // Wait for ICE parsing to complete network map profile allocation
+            setTimeout(() => {
+                const packetString = btoa(JSON.stringify(rtcPeer.localDescription));
+                sdpBox.value = packetString;
+                
+                // Build a URL containing the network invitation configuration parameters
+                const appUri = window.location.origin + window.location.pathname + "?invite=" + packetString;
+                
+                // Render a QR code copy reference instantly inside UI viewport layout frame
+                const canvasBox = document.getElementById('canvas-container');
+                canvasBox.style.display = "inline-block";
+                QRCode.toCanvas(document.getElementById('qrcode'), appUri, { width: 180 }, function (error) {
+                    if (error) console.error(error);
                 });
+
+                updateStatus("Invite code ready! Copy the textbox contents or scan the QR code.", "#38bdf8");
+            }, 800);
         });
 
-        function initWebRTC() {
-            pc = new RTCPeerConnection({
-                iceServers: [{ urls: 'stun:://google.com' }]
+        // ================= AUTOMATED PARSING ENGINE (URL INVITATIONS) =================
+        const URLQueryPayload = new URLSearchParams(window.location.search).get('invite');
+        if (URLQueryPayload) {
+            window.addEventListener('load', () => {
+                setTimeout(() => {
+                    if (!localMicStream) return updateStatus("Grant mic permission then reload link.", "#ef4444");
+                    sdpBox.value = URLQueryPayload;
+                    updateStatus("Link detected! Click 'Accept & Process Connection' to link.", "#38bdf8");
+                }, 1000);
             });
-
-            // Προσθήκη του ήχου μας
-            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-
-            // Λήψη του ήχου του άλλου χρήστη
-            pc.ontrack = (event) => {
-                remoteAudio.srcObject = event.streams;
-                statusDiv.innerText = "ΣΥΝΔΕΘΗΚΕ! Μιλήστε ελεύθερα.";
-                statusDiv.style.background = "#d4edda";
-                statusDiv.style.color = "#155724";
-            };
-
-            // Αυτόματη αποστολή δικτυακών σημάτων (ICE Candidates)
-            pc.onicecandidate = (event) => {
-                if (event.candidate) {
-                    bgt.send({ 'ice': event.candidate });
-                }
-            };
-
-            // Όταν η Bugout λάβει σήμα από τον άλλον browser
-            bgt.on("message", async (address, data) => {
-                if (data.offer && pc.signalingState === "stable") {
-                    await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-                    const answer = await pc.createAnswer();
-                    await pc.setLocalDescription(answer);
-                    bgt.send({ 'answer': pc.localDescription });
-                } 
-                else if (data.answer && pc.signalingState === "have-local-offer") {
-                    await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-                } 
-                else if (data.ice) {
-                    pc.addIceCandidate(new RTCIceCandidate(data.ice)).catch(e => {});
-                }
-            });
-
-            statusDiv.innerText = "Αναμονή για τον φίλο σας... Μόλις μπει, θα συνδεθεί μόνο του.";
-
-            // Δημιουργία αυτόματης πρόσκλησης (Offer)
-            setTimeout(async () => {
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-                bgt.send({ 'offer': pc.localDescription });
-            }, 1500);
         }
+
+        // ================= USER B/A: PROCESSING HANDSHAKE SEQUENCES =================
+        document.getElementById('process-sdp-btn').addEventListener('click', async () => {
+            const incomingPayload = sdpBox.value.trim();
+            if (!incomingPayload) return alert("Please enter the cryptographic handshake string first!");
+
+            try {
+                const parsedSession = JSON.parse(atob(incomingPayload));
+
+                if (parsedSession.type === "offer") {
+                    // USER B PROCESSES OFFER AND CREATES THE FINAL ANSWER
+                    createCorePeerConnection();
+                    await rtcPeer.setRemoteDescription(new RTCSessionDescription(parsedSession));
+                    
+                    const sessionAnswer = await rtcPeer.createAnswer();
+                    await rtcPeer.setLocalDescription(sessionAnswer);
+
+                    setTimeout(() => {
+                        sdpBox.value = btoa(JSON.stringify(rtcPeer.localDescription));
+                        updateStatus("Answer generated! Send the new string back to User A.", "#ff9800");
+                        document.getElementById('canvas-container').style.display = "none";
+                    }, 800);
+
+                } else if (parsedSession.type === "answer") {
+                    // USER A RECEIVES THE ANSWER AND OPENS PIPELINE FLUIDITY
+                    await rtcPeer.setRemoteDescription(new RTCSessionDescription(parsedSession));
+                    updateStatus("Establishing P2P tunnel streams...", "#22c55e");
+                }
+            } catch (runtimeException) {
+                alert("Invalid cryptographic packet data string provided!");
+                console.error(runtimeException);
+            }
+        });
     </script>
 </body>
 </html>
