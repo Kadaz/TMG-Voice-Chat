@@ -2,90 +2,45 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>RAW Voice Chat</title>
+  <title>Voice Chat</title>
 </head>
 <body style="font-family:Arial; text-align:center; padding-top:40px;">
 
 <h2>🎧 Voice Chat</h2>
 
-<input id="room" placeholder="Room ID" />
-<button onclick="start()">Start</button>
+<input id="room" placeholder="Room name" />
+<button onclick="join()">Join</button>
 
 <p id="status">idle</p>
 
+<script src="https://unpkg.com/@daily-co/daily-js"></script>
+
 <script>
-let pc;
-let localStream;
-let channel;
+let call;
 
-const config = {
-  iceServers: [
-    { urls: "stun:stun.l.google.com:19302" }
-  ]
-};
-
-async function start() {
+async function join() {
   const room = document.getElementById("room").value;
   if (!room) return;
 
-  document.getElementById("status").innerText = "starting mic...";
+  document.getElementById("status").innerText = "connecting...";
 
-  localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  // public demo domain (no setup)
+  const url = "https://demo.daily.co/" + room;
 
-  pc = new RTCPeerConnection(config);
-
-  localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
-
-  pc.ontrack = (e) => {
-    const audio = document.createElement("audio");
-    audio.srcObject = e.streams[0];
-    audio.autoplay = true;
-    document.body.appendChild(audio);
-  };
-
-  pc.onicecandidate = (e) => {
-    if (e.candidate) {
-      channel.postMessage({ type: "ice", data: e.candidate });
+  call = window.DailyIframe.createFrame({
+    iframeStyle: {
+      position: "fixed",
+      top: 0,
+      left: 0,
+      width: "100%",
+      height: "100%",
+      border: "0"
     }
-  };
+  });
 
-  channel = new BroadcastChannel("voice_" + room);
+  call.join({ url });
 
-  channel.onmessage = async (msg) => {
-    const data = msg.data;
-
-    if (data.type === "offer") {
-      await pc.setRemoteDescription(data.offer);
-
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-
-      channel.postMessage({ type: "answer", answer });
-    }
-
-    if (data.type === "answer") {
-      await pc.setRemoteDescription(data.answer);
-    }
-
-    if (data.type === "ice") {
-      try {
-        await pc.addIceCandidate(data.data);
-      } catch {}
-    }
-  };
-
-  // decide caller/receiver automatically
-  const isCaller = Math.random() > 0.5;
-
-  if (isCaller) {
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-
-    channel.postMessage({ type: "offer", offer });
-    document.getElementById("status").innerText = "calling...";
-  } else {
-    document.getElementById("status").innerText = "waiting...";
-  }
+  document.getElementById("status").innerText = "connected";
 }
 </script>
 
