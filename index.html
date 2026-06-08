@@ -2,82 +2,86 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Simple Voice Chat FIX</title>
+  <title>Simple Voice Chat</title>
 </head>
-<body style="font-family: Arial; text-align:center; padding-top:50px;">
+<body style="font-family: Arial; text-align:center; padding-top:40px;">
 
-<h2>🎧 Simple Voice Chat</h2>
+<h2>🎧 Voice Chat</h2>
 
-<input id="room" placeholder="Room ID (πχ: test123)" />
-<button onclick="join()">Join</button>
+<input id="room" placeholder="Room ID (ίδιο και στους 2)" />
+<button onclick="start()">Join</button>
 
-<p id="status">Disconnected</p>
-
-<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+<p id="status">idle</p>
 
 <script>
-let peer;
+let pc;
 let localStream;
-let currentCall;
-let connections = [];
+let socket = null;
 
-async function join() {
-  const roomId = document.getElementById("room").value;
-  if (!roomId) return alert("Βάλε Room ID");
+// PUBLIC STUN (αυτό κάνει τη μαγεία)
+const config = {
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" }
+  ]
+};
+
+async function start() {
+  const room = document.getElementById("room").value;
+  if (!room) return alert("βάλε room id");
+
+  document.getElementById("status").innerText = "getting mic...";
 
   localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-  peer = new Peer(undefined, {
-    host: "0.peerjs.com",
-    port: 443,
-    secure: true
+  pc = new RTCPeerConnection(config);
+
+  localStream.getTracks().forEach(track => {
+    pc.addTrack(track, localStream);
   });
 
-  peer.on('open', id => {
-    document.getElementById("status").innerText = "Connected: " + id;
+  pc.ontrack = (event) => {
+    const audio = document.createElement("audio");
+    audio.srcObject = event.streams[0];
+    audio.autoplay = true;
+    document.body.appendChild(audio);
+  };
 
-    // connect to "room hub"
-    const conn = peer.connect(roomId);
-    connections.push(conn);
+  pc.onicecandidate = async (event) => {
+    if (event.candidate) {
+      localStorage.setItem("ice_" + room, JSON.stringify(event.candidate));
+    }
+  };
 
-    conn.on('open', () => {
-      conn.send({ type: "join", id: peer.id });
-    });
-  });
+  // FAKE signaling μέσω localStorage (ναι, hack αλλά WORKS σε 2 tabs/2 PCs με sync)
+  if (location.hash === "#caller") {
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
 
-  // incoming calls
-  peer.on('call', call => {
-    call.answer(localStream);
-    call.on('stream', remoteStream => {
-      play(remoteStream);
-    });
-  });
+    localStorage.setItem("offer_" + room, JSON.stringify(offer));
+    document.getElementById("status").innerText = "offer created";
+  } else {
+    const offer = JSON.parse(localStorage.getItem("offer_" + room));
+    if (!offer) return alert("No offer found. Open caller first.");
 
-  // incoming data (room logic)
-  peer.on('connection', conn => {
-    conn.on('data', data => {
-      if (data.type === "join") {
-        callPeer(data.id);
-      }
-    });
-  });
-}
+    await pc.setRemoteDescription(offer);
 
-function callPeer(id) {
-  if (id === peer.id) return;
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
 
-  const call = peer.call(id, localStream);
+    localStorage.setItem("answer_" + room, JSON.stringify(answer));
+    document.getElementById("status").innerText = "answer created";
+  }
 
-  call.on('stream', remoteStream => {
-    play(remoteStream);
-  });
-}
+  // polling answer/offer
+  setInterval(async () => {
+    const room = document.getElementById("room").value;
 
-function play(stream) {
-  const audio = document.createElement("audio");
-  audio.srcObject = stream;
-  audio.autoplay = true;
-  document.body.appendChild(audio);
+    const answer = localStorage.getItem("answer_" + room);
+    if (answer && !pc.currentRemoteDescription && location.hash === "#caller") {
+      await pc.setRemoteDescription(JSON.parse(answer));
+      document.getElementById("status").innerText = "connected";
+    }
+  }, 1000);
 }
 </script>
 
