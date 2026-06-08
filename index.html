@@ -2,96 +2,61 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Simple Voice Chat</title>
+  <title>Working Voice Chat</title>
 </head>
 <body>
 
 <h2>VOICE CHAT</h2>
 
 <input id="room" placeholder="room id">
-<button onclick="join()">Join Room</button>
+<button onclick="start()">Join</button>
+
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
 
 <script>
-let pc;
-let localStream;
-let roomId;
+let peer;
+let calls = {};
+let stream;
 
-// 🟢 public signaling server (δεν χρειάζεται setup)
-const SIGNALING = "https://signaling.simplewebrtc.dev";
-
-async function getMic() {
-  localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+async function getMic(){
+  stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 }
 
-function setupPeer() {
-  pc = new RTCPeerConnection({
-    iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+function startPeer(id){
+  peer = new Peer(id, {
+    host: 'peerjs.com',
+    secure: true,
+    port: 443
   });
 
-  localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+  peer.on('open', id => {
+    console.log("My ID:", id);
+  });
 
-  pc.ontrack = (e) => {
-    const audio = document.createElement("audio");
-    audio.autoplay = true;
-    audio.srcObject = e.streams[0];
-    document.body.appendChild(audio);
-  };
+  peer.on('call', call => {
+    call.answer(stream);
 
-  pc.onicecandidate = async (e) => {
-    if (!e.candidate) return;
-
-    await fetch(`${SIGNALING}/signal`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        room: roomId,
-        candidate: e.candidate
-      })
+    call.on('stream', remoteStream => {
+      const audio = document.createElement('audio');
+      audio.autoplay = true;
+      audio.srcObject = remoteStream;
+      document.body.appendChild(audio);
     });
-  };
+  });
 }
 
-async function join() {
-  roomId = document.getElementById("room").value;
+async function start(){
+  const room = document.getElementById("room").value;
 
   await getMic();
-  setupPeer();
+  startPeer(room);
 
-  // create or join
-  const offerRes = await fetch(`${SIGNALING}/offer?room=${roomId}`);
-  const offer = await offerRes.json();
-
-  if (!offer || !offer.sdp) {
-    const newOffer = await pc.createOffer();
-    await pc.setLocalDescription(newOffer);
-
-    await fetch(`${SIGNALING}/offer`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ room: roomId, sdp: newOffer })
+  setTimeout(() => {
+    Object.keys(peer._connections).forEach(id => {
+      const call = peer.call(id, stream);
+      calls[id] = call;
     });
-
-  } else {
-    await pc.setRemoteDescription(offer);
-
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-
-    await fetch(`${SIGNALING}/answer`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ room: roomId, sdp: answer })
-    });
-  }
-
-  setInterval(async () => {
-    const res = await fetch(`${SIGNALING}/answer?room=${roomId}`);
-    const answer = await res.json();
-
-    if (answer?.sdp && !pc.currentRemoteDescription) {
-      await pc.setRemoteDescription(answer);
-    }
-  }, 2000);
+  }, 1500);
 }
 </script>
 
