@@ -3,123 +3,120 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Auto Voice Chat (GitHub Pages)</title>
-    <!-- Εισαγωγή της GunDB για αυτόματο handshake χωρίς δικό μας server -->
-    <script src="https://jsdelivr.net"></script>
+    <title>Auto LAN Voice Chat</title>
+    <!-- Εισαγωγή της βιβλιοθήκης PubNub για αυτόματο LAN Handshake -->
+    <script src="https://pubnub.com"></script>
     <style>
-        body { font-family: sans-serif; text-align: center; padding: 40px; background: #f0f2f5; color: #333; }
-        .box { background: white; padding: 30px; border-radius: 12px; width: 340px; margin: 0 auto; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        button { background: #28a745; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; width: 100%; font-weight: bold; font-size: 16px; margin-top: 15px; }
+        body { font-family: sans-serif; text-align: center; padding: 40px; background: #eef2f7; color: #333; }
+        .box { background: white; padding: 30px; border-radius: 12px; width: 350px; margin: 0 auto; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        button { background: #28a745; color: white; border: none; padding: 12px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; margin-top: 15px; font-size: 15px; }
         button:hover { background: #218838; }
-        #status { font-weight: bold; margin-top: 20px; padding: 10px; border-radius: 6px; background: #e2e3e5; font-size: 14px; }
+        #status { font-weight: bold; margin-top: 20px; padding: 12px; border-radius: 6px; background: #e2e3e5; font-size: 14px; }
     </style>
 </head>
 <body>
 
     <div class="box">
-        <h3>Auto Voice Chat</h3>
-        <p style="font-size: 13px; color: #666;">Η κλήση θα ξεκινήσει αυτόματα μόλις μπείτε στο ίδιο δωμάτιο.</p>
+        <h3>LAN Voice Chat (Auto)</h3>
+        <p style="font-size: 13px; color: #666;">Ανοίξτε και οι δύο τη σελίδα στο ίδιο δίκτυο LAN.</p>
         <hr>
         
-        <button id="start-btn">1. Ενεργοποίηση Μικροφώνου</button>
+        <button id="start-btn">Ενεργοποίηση & Σύνδεση</button>
         
-        <div id="status">Πατήστε το πράσινο κουμπί για να ξεκινήσετε.</div>
+        <div id="status">Πατήστε το κουμπί για να ξεκινήσει η αυτόματη σύνδεση LAN.</div>
     </div>
 
-    <!-- Κρυφό στοιχείο για τον ήχο του άλλου -->
+    <!-- Στοιχείο για τον ήχο του άλλου χρήστη -->
     <audio id="remote-audio" autoplay></audio>
 
     <script>
-        const startBtn = document.getElementById('start-btn');
         const statusDiv = document.getElementById('status');
+        const startBtn = document.getElementById('start-btn');
         const remoteAudio = document.getElementById('remote-audio');
 
-        let localStream = null;
-        let pc = null;
-        let gun = null;
-        let room = null;
-
-        // Δημιουργούμε ένα σταθερό όνομα δωματίου. 
-        // Αν θέλετε άλλο δωμάτιο, απλά αλλάξτε αυτή τη λέξη.
-        const roomName = "greece-voice-room-123"; 
+        let localStream;
+        let pc;
+        let pubnub;
+        
+        // Κοινό όνομα καναλιού για το LAN σας
+        const CHANNEL_NAME = "lan_voice_handshake_room_xyz"; 
 
         startBtn.addEventListener('click', () => {
-            statusDiv.innerText = "Ανοιγμα μικροφώνου... Πατήστε Αποδοχή.";
+            statusDiv.innerText = "Ανοιγμα μικροφώνου...";
             
             navigator.mediaDevices.getUserMedia({ audio: true, video: false })
                 .then(stream => {
                     localStream = stream;
                     startBtn.style.display = 'none';
-                    statusDiv.innerText = "Σύνδεση στο δίκτυο... Παρακαλώ περιμένετε...";
+                    statusDiv.innerText = "Αναζήτηση άλλου υπολογιστή στο LAN...";
                     
-                    // Σύνδεση στους δωρεάν δημόσιους servers της GunDB
-                    gun = Gun(['https://herokuapp.com']);
-                    room = gun.get(roomName);
+                    // Αρχιικοποίηση PubNub με δωρεάν demo κλειδιά
+                    pubnub = new PubNub({
+                        publishKey: 'pub-c-db252277-c917-48f0-b6f7-b76da89345e6',
+                        subscribeKey: 'sub-c-5fec84d2-dca0-11e9-913b-12d8a56209eb',
+                        userId: "user_" + Math.floor(Math.random() * 1000)
+                    });
 
-                    initWebRTC();
+                    initLANWebRTC();
                 })
                 .catch(err => {
                     statusDiv.innerText = "Σφάλμα μικροφώνου: " + err.message;
                 });
         });
 
-        function initWebRTC() {
-            // Καθαρή σύνδεση WebRTC με δωρεάν STUN της Google
-            pc = new RTCPeerConnection({
-                iceServers: [{ urls: 'stun:://google.com' }]
-            });
+        function initLANWebRTC() {
+            // Δημιουργία WebRTC σύνδεσης (Καθαρό LAN χωρίς εξωτερικούς servers)
+            pc = new RTCPeerConnection({ iceServers: [] });
 
             // Προσθήκη του ήχου μας
             localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 
-            // Όταν έρθει ο ήχος του άλλου
+            // Όταν λάβουμε τον ήχο του άλλου υπολογιστή στο LAN
             pc.ontrack = (event) => {
-                remoteAudio.srcObject = event.streams[0];
-                statusDiv.innerText = "Συνδέθηκε! Μιλήστε ελεύθερα.";
+                remoteAudio.srcObject = event.streams;
+                statusDiv.innerText = "ΣΥΝΔΕΘΗΚΕ! Μιλήστε ελεύθερα στο LAN.";
                 statusDiv.style.background = "#d4edda";
                 statusDiv.style.color = "#155724";
             };
 
-            // Αυτόματη αποστολή δικτυακών στοιχείων (ICE Candidates)
-            pc.onicecandidate = (event) => {
-                if (event.candidate) {
-                    room.get('ice').put(JSON.stringify(event.candidate));
-                }
-            };
+            // Λήψη μηνυμάτων από το PubNub (Αυτόματο handshake)
+            pubnub.addListener({
+                message: async (payload) => {
+                    // Αγνοούμε τα δικά μας μηνύματα
+                    if (payload.publisher === pubnub.getUserId()) return;
 
-            // Ακούμε αν ο άλλος υπολογιστής έστειλε Πρόσκληση (Offer) ή Απάντηση (Answer)
-            room.on((data) => {
-                if (!data) return;
+                    const data = payload.message;
 
-                if (data.offer && pc.signalingState === "stable") {
-                    const offer = JSON.parse(data.offer);
-                    pc.setRemoteDescription(new RTCSessionDescription(offer))
-                        .then(() => pc.createAnswer())
-                        .then(answer => pc.setLocalDescription(answer))
-                        .then(() => {
-                            room.get('answer').put(JSON.stringify(pc.localDescription));
+                    if (data.offer && pc.signalingState === "stable") {
+                        await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+                        const answer = await pc.createAnswer();
+                        await pc.setLocalDescription(answer);
+                        
+                        // Στέλνουμε την απάντηση αυτόματα πίσω
+                        pubnub.publish({
+                            channel: CHANNEL_NAME,
+                            message: { answer: pc.localDescription }
                         });
-                }
-
-                if (data.answer && pc.signalingState === "have-local-offer") {
-                    const answer = JSON.parse(data.answer);
-                    pc.setRemoteDescription(new RTCSessionDescription(answer));
-                }
-
-                if (data.ice) {
-                    const candidate = JSON.parse(data.ice);
-                    pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => {});
+                    } 
+                    else if (data.answer && pc.signalingState === "have-local-offer") {
+                        await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+                    }
                 }
             });
 
-            // Ο πρώτος που μπαίνει δημιουργεί αυτόματα την πρόσκληση (Offer)
-            statusDiv.innerText = "Αναμονή για τον φίλο σας... (Μόλις μπει, θα συνδεθεί μόνο του)";
-            
-            pc.createOffer()
-                .then(offer => pc.setLocalDescription(offer))
-                .then(() => {
-                    room.get('offer').put(JSON.stringify(pc.localDescription));
+            // Εγγραφή στο κανάλι για να ακούμε
+            pubnub.subscribe({ channels: [CHANNEL_NAME] });
+
+            // Περιμένουμε 1 δευτερόλεπτο και στέλνουμε αυτόματα την πρόσκληση (Offer) στο LAN
+            setTimeout(async () => {
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                
+                pubnub.publish({
+                    channel: CHANNEL_NAME,
+                    message: { offer: pc.localDescription }
                 });
+            }, 1000);
         }
     </script>
 </body>
