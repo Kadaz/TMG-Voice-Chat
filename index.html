@@ -1,102 +1,84 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>2P Voice Chat</title>
+  <title>2P Voice Chat Simple</title>
 </head>
 <body>
 
-<h2>🎤 2 Player Voice Chat</h2>
+<h2>🎤 2 Person Voice Chat</h2>
 
-<input id="room" placeholder="room name (π.χ. test123)">
-<button id="join">Join Voice Room</button>
+<button id="start">Start / Create</button>
+<button id="join">Join</button>
 <button id="leave">Leave</button>
 
+<p>LOCAL</p>
+<audio id="localAudio" autoplay muted></audio>
+
+<p>REMOTE</p>
 <audio id="remoteAudio" autoplay></audio>
 
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js";
-import { getFirestore, doc, setDoc, getDoc, onSnapshot, deleteDoc } 
-from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
+<textarea id="box" placeholder="offer/answer here" rows="6" cols="50"></textarea><br>
 
-const firebaseConfig = {
-  apiKey: "AIzaSyBBQDKV4YiwW8CBlxSXwgV6ppGuvC_mLPs",
-  authDomain: "tmg-voice-chat.firebaseapp.com",
-  projectId: "tmg-voice-chat"
-};
+<button id="set">Set</button>
 
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+<script>
+let pc;
+let stream;
 
 const servers = {
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
 };
 
-let pc;
-let stream;
-
-async function createPeer(room) {
+async function init() {
   pc = new RTCPeerConnection(servers);
 
   stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
+  document.getElementById("localAudio").srcObject = stream;
+
   stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
-  pc.ontrack = (event) => {
-    document.getElementById("remoteAudio").srcObject = event.streams[0];
-  };
-
-  pc.onicecandidate = async (e) => {
-    if (e.candidate) {
-      await setDoc(doc(db, "rooms", room, "candidates", "c1"), {
-        c: JSON.stringify(e.candidate)
-      });
-    }
+  pc.ontrack = (e) => {
+    document.getElementById("remoteAudio").srcObject = e.streams[0];
   };
 }
 
+/* CREATE */
+document.getElementById("start").onclick = async () => {
+  await init();
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  document.getElementById("box").value = JSON.stringify(pc.localDescription);
+};
+
+/* JOIN */
 document.getElementById("join").onclick = async () => {
-  const room = document.getElementById("room").value;
+  await init();
+};
 
-  await createPeer(room);
+/* SET OFFER/ANSWER */
+document.getElementById("set").onclick = async () => {
+  const data = JSON.parse(document.getElementById("box").value);
 
-  const roomRef = doc(db, "rooms", room);
-  const snap = await getDoc(roomRef);
+  if (!pc.currentRemoteDescription) {
+    await pc.setRemoteDescription(data);
 
-  // 🟢 HOST
-  if (!snap.exists()) {
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
+    if (data.type === "offer") {
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
 
-    await setDoc(roomRef, {
-      offer: JSON.stringify(offer)
-    });
-
-    onSnapshot(roomRef, async (docSnap) => {
-      const data = docSnap.data();
-      if (data?.answer && !pc.currentRemoteDescription) {
-        await pc.setRemoteDescription(JSON.parse(data.answer));
-      }
-    });
-
-  } 
-  // 🟡 JOINER
-  else {
-    const offer = JSON.parse(snap.data().offer);
-
-    await pc.setRemoteDescription(offer);
-
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-
-    await setDoc(roomRef, {
-      offer: snap.data().offer,
-      answer: JSON.stringify(answer)
-    });
+      document.getElementById("box").value =
+        JSON.stringify(pc.localDescription);
+    }
+  } else {
+    await pc.setRemoteDescription(data);
   }
 };
 
-/* ================= LEAVE ================= */
-document.getElementById("leave").onclick = async () => {
+/* LEAVE */
+document.getElementById("leave").onclick = () => {
   if (pc) pc.close();
 
   if (stream) {
@@ -104,8 +86,9 @@ document.getElementById("leave").onclick = async () => {
   }
 
   document.getElementById("remoteAudio").srcObject = null;
+  document.getElementById("localAudio").srcObject = null;
 
-  alert("Left voice room");
+  alert("Left voice chat");
 };
 </script>
 
