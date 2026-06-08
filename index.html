@@ -2,21 +2,21 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Voice Chat</title>
+  <title>Voice Chat Fixed</title>
 </head>
 <body>
-  <h2>Voice Chat</h2>
+  <h2>Voice Chat (Fixed)</h2>
 
   <input id="room" placeholder="room id (π.χ. test123)" />
-  <button onclick="join()">Join</button>
-  <button onclick="call()">Call</button>
+  <button onclick="join()">Join (Caller)</button>
+  <button onclick="call()">Call (Callee)</button>
   <button onclick="hang()">Hang</button>
 
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 
   <script>
-    // 🔥 YOUR FIREBASE CONFIG (αυτό που μου έστειλες)
+    // 🔥 YOUR FIREBASE CONFIG
     const firebaseConfig = {
       apiKey: "AIzaSyBBQDKV4YiwW8CBlxSXwgV6ppGuvC_mLPs",
       authDomain: "tmg-voice-chat.firebaseapp.com",
@@ -38,31 +38,52 @@
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
     };
 
-    async function initAudio() {
-      localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    async function getAudio() {
+      localStream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: false
+      });
     }
 
+    function setupPeer() {
+      pc = new RTCPeerConnection(servers);
+
+      localStream.getTracks().forEach(track => {
+        pc.addTrack(track, localStream);
+      });
+
+      // 🔥 REMOTE AUDIO FIX (IMPORTANT)
+      pc.ontrack = (event) => {
+        const audio = document.createElement("audio");
+        audio.autoplay = true;
+        audio.playsInline = true;
+        audio.srcObject = event.streams[0];
+        document.body.appendChild(audio);
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          const collection = isCaller ? "callerCandidates" : "calleeCandidates";
+          roomRef.collection(collection).add(event.candidate.toJSON());
+        }
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        console.log("ICE:", pc.iceConnectionState);
+      };
+    }
+
+    let isCaller = false;
+
+    // 🟢 CALLER
     async function join() {
-      await initAudio();
+      isCaller = true;
 
       const roomId = document.getElementById("room").value;
       roomRef = db.collection("rooms").doc(roomId);
 
-      pc = new RTCPeerConnection(servers);
-
-      localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
-
-      pc.ontrack = (event) => {
-        const audio = new Audio();
-        audio.srcObject = event.streams[0];
-        audio.play();
-      };
-
-      pc.onicecandidate = (e) => {
-        if (e.candidate) {
-          roomRef.collection("callerCandidates").add(e.candidate.toJSON());
-        }
-      };
+      await getAudio();
+      setupPeer();
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
@@ -76,7 +97,7 @@
         }
       });
 
-      roomRef.collection("calleeCandidates").onSnapshot(snapshot => {
+      roomRef.collection("callerCandidates").onSnapshot(snapshot => {
         snapshot.docChanges().forEach(async change => {
           if (change.type === "added") {
             await pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
@@ -85,29 +106,19 @@
       });
     }
 
+    // 🟢 CALLEE
     async function call() {
-      await initAudio();
+      isCaller = false;
 
       const roomId = document.getElementById("room").value;
       roomRef = db.collection("rooms").doc(roomId);
 
-      pc = new RTCPeerConnection(servers);
+      await getAudio();
+      setupPeer();
 
-      localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+      const offerDoc = await roomRef.get();
+      const offer = offerDoc.data().offer;
 
-      pc.ontrack = (event) => {
-        const audio = new Audio();
-        audio.srcObject = event.streams[0];
-        audio.play();
-      };
-
-      pc.onicecandidate = (e) => {
-        if (e.candidate) {
-          roomRef.collection("calleeCandidates").add(e.candidate.toJSON());
-        }
-      };
-
-      const offer = (await roomRef.get()).data().offer;
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
 
       const answer = await pc.createAnswer();
@@ -115,7 +126,7 @@
 
       await roomRef.update({ answer });
 
-      roomRef.collection("callerCandidates").onSnapshot(snapshot => {
+      roomRef.collection("calleeCandidates").onSnapshot(snapshot => {
         snapshot.docChanges().forEach(async change => {
           if (change.type === "added") {
             await pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
