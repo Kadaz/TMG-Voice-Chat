@@ -3,117 +3,137 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple Voice Chat</title>
-    <!-- Εισαγωγή PeerJS -->
+    <title>Walkie Talkie (GitHub Pages)</title>
+    <!-- Χρησιμοποιούμε PeerJS μόνο για να στέλνουμε τα αρχεία ήχου -->
     <script src="https://unpkg.com"></script>
     <style>
-        body { font-family: sans-serif; text-align: center; padding: 40px; background: #f0f2f5; color: #333; }
-        .box { background: white; padding: 30px; border-radius: 12px; width: 320px; margin: 0 auto; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        button { border: none; padding: 12px; border-radius: 6px; cursor: pointer; width: 100%; font-weight: bold; margin-top: 10px; font-size: 15px; }
-        .btn-start { background: #28a745; color: white; }
-        .btn-start:hover { background: #218838; }
-        .btn-call { background: #007bff; color: white; display: none; }
-        .btn-call:hover { background: #0069d9; }
-        input { padding: 10px; width: 90%; text-align: center; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 16px; display: none; }
-        #status { font-weight: bold; margin-top: 20px; padding: 10px; border-radius: 6px; background: #e2e3e5; font-size: 14px; }
-        hr { margin: 20px 0; border: 0; border-top: 1px solid #eee; }
+        body { font-family: sans-serif; text-align: center; padding: 40px; background: #eef2f7; color: #333; }
+        .box { background: white; padding: 30px; border-radius: 15px; width: 320px; margin: 0 auto; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .btn-talk { background: #dc3545; color: white; border: none; padding: 20px; border-radius: 50%; width: 120px; height: 120px; font-weight: bold; cursor: pointer; font-size: 16px; margin: 20px 0; box-shadow: 0 4px 10px rgba(220,53,69,0.4); user-select: none; -webkit-user-select: none; }
+        .btn-talk:active { background: #bd2130; transform: scale(0.95); }
+        .btn-conn { background: #007bff; color: white; border: none; padding: 10px; border-radius: 5px; cursor: pointer; width: 100%; font-weight: bold; }
+        input { padding: 10px; width: 90%; text-align: center; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 5px; }
+        #status { font-weight: bold; margin-top: 15px; padding: 10px; border-radius: 5px; background: #e2e3e5; font-size: 14px; }
     </style>
 </head>
 <body>
 
     <div class="box">
-        <h3>Voice Chat (P2P)</h3>
-        <p>Το ID σου: <span id="my-id" style="font-weight:bold; color:#28a745; font-size: 22px;">---</span></p>
-        
-        <!-- ΚΟΥΜΠΙ 1: Ξεκλειδώνει το μικρόφωνο στον Browser -->
-        <button id="start-btn" class="btn-start">1. Ενεργοποίηση Μικροφώνου</button>
-        
+        <h3>Walkie Talkie</h3>
+        <p>Το ID σου: <span id="my-id" style="font-weight:bold; color:#007bff; font-size: 20px;">...</span></p>
         <hr>
         
-        <!-- Στοιχεία Κλήσης: Εμφανίζονται ΜΟΝΟ αφού εγκριθεί το μικρόφωνο -->
         <input type="text" id="peer-id" placeholder="Βάλε το ID του φίλου">
-        <button id="call-btn" class="btn-call">2. Έναρξη Κλήσης</button>
+        <button id="conn-btn" class="btn-conn">Σύνδεση με φίλο</button>
         
-        <div id="status">Πατήστε το πράσινο κουμπί για να ξεκινήσετε.</div>
+        <!-- Κρατήστε πατημένο για να μιλήσετε -->
+        <button id="talk-btn" class="btn-talk" disabled>ΚΡΑΤΑ ΤΟ<br>ΓΙΑ ΝΑ ΜΙΛΗΣΕΙΣ</button>
+        
+        <div id="status">Σύνδεση στον server...</div>
     </div>
 
-    <!-- Ήχος από τον άλλον χρήστη -->
-    <audio id="remote-audio" autoplay></audio>
-
     <script>
-        const startBtn = document.getElementById('start-btn');
-        const callBtn = document.getElementById('call-btn');
-        const peerInput = document.getElementById('peer-id');
         const statusDiv = document.getElementById('status');
+        const talkBtn = document.getElementById('talk-btn');
+        const connBtn = document.getElementById('conn-btn');
         
-        let myStream = null;
         let peer = null;
+        let connection = null;
+        let mediaRecorder = null;
+        let audioChunks = [];
 
-        // ΒΗΜΑ 1: Ο χρήστης πατάει το κουμπί χειροκίνητα
-        startBtn.addEventListener('click', () => {
-            statusDiv.innerText = "Ανοιγμα μικροφώνου... Πατήστε Αποδοχή αν σας ζητηθεί.";
-            
-            navigator.mediaDevices.getUserMedia({ audio: true, video: false })
-                .then((stream) => {
-                    myStream = stream;
-                    
-                    // Κρύβουμε το πρώτο κουμπί και εμφανίζουμε τα στοιχεία κλήσης
-                    startBtn.style.display = 'none';
-                    peerInput.style.display = 'block';
-                    callBtn.style.display = 'block';
-                    
-                    statusDiv.innerText = "Το μικρόφωνο εγκρίθηκε! Σύνδεση με τον server...";
-                    initPeerJS();
-                })
-                .catch(err => {
-                    statusDiv.style.background = "#f8d7da";
-                    statusDiv.style.color = "#721c24";
-                    statusDiv.innerText = "Σφάλμα: Ο browser απέρριψε το μικρόφωνο. Δοκιμάστε ξανά ή αλλάξτε browser.";
-                    console.error(err);
-                });
+        // 1. Σύνδεση στον Server με τυχαίο ID
+        const myId = Math.floor(1000 + Math.random() * 9000).toString();
+        peer = new Peer(myId);
+
+        peer.on('open', (id) => {
+            document.getElementById('my-id').innerText = id;
+            statusDiv.innerText = "Έτοιμο. Βάλε το ID του φίλου σου και πάτα Σύνδεση.";
+            setupMicrophone();
         });
 
-        // ΒΗΜΑ 2: Σύνδεση στο δίκτυο
-        function initPeerJS() {
-            // Παραγωγή τυχαίου ID
-            const myId = Math.floor(1000 + Math.random() * 9000).toString();
-            
-            peer = new Peer(myId, {
-                config: { 'iceServers': [{ url: 'stun:://google.com' }] }
-            });
+        // Προετοιμασία εγγραφής ήχου (χωρίς WebRTC κλήση)
+        function setupMicrophone() {
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    mediaRecorder = new MediaRecorder(stream);
+                    
+                    mediaRecorder.ondataavailable = event => {
+                        audioChunks.push(event.data);
+                    };
 
-            peer.on('open', (id) => {
-                document.getElementById('my-id').innerText = id;
-                statusDiv.style.background = "#d4edda";
-                statusDiv.style.color = "#155724";
-                statusDiv.innerText = "Έτοιμο! Δώστε το ID σας ή καλέστε το ID του φίλου σας.";
-            });
-
-            // Όταν δεχόμαστε κλήση
-            peer.on('call', (incomingCall) => {
-                statusDiv.innerText = "Εισερχόμενη κλήση... Σύνδεση ήχου...";
-                incomingCall.answer(myStream);
-                
-                incomingCall.on('stream', (remoteStream) => {
-                    document.getElementById('remote-audio').srcObject = remoteStream;
-                    statusDiv.innerText = "Σε κλήση! Μπορείτε να μιλήσετε.";
+                    mediaRecorder.onstop = () => {
+                        const audioBlob = new Blob(audioChunks, { type: 'audio/ogg; codecs=opus' });
+                        audioChunks = [];
+                        
+                        // Στέλνουμε το ηχητικό αρχείο στον άλλον
+                        if (connection && connection.open) {
+                            connection.send(audioBlob);
+                            statusDiv.innerText = "Το μήνυμα στάλθηκε!";
+                        } else {
+                            statusDiv.innerText = "Σφάλμα: Δεν είστε συνδεδεμένοι με κάποιον.";
+                        }
+                    };
+                })
+                .catch(err => {
+                    statusDiv.innerText = "Αποτυχία μικροφώνου: " + err.message;
                 });
+        }
+
+        // 2. Όταν ΕΜΕΙΣ πατάμε σύνδεση
+        connBtn.addEventListener('click', () => {
+            const remoteId = document.getElementById('peer-id').value.trim();
+            if (!remoteId) return alert("Βάλε ID!");
+            
+            statusDiv.innerText = "Σύνδεση με τον " + remoteId + "...";
+            connection = peer.connect(remoteId);
+            setupConnectionEvents();
+        });
+
+        // 3. Όταν ο ΑΛΛΟΣ συνδέεται μαζί μας
+        peer.on('connection', (conn) => {
+            connection = conn;
+            setupConnectionEvents();
+        });
+
+        function setupConnectionEvents() {
+            connection.on('open', () => {
+                statusDiv.innerText = "Συνδέθηκε! Κρατήστε πατημένο το κόκκινο κουμπί για να μιλήσετε.";
+                talkBtn.disabled = false;
+            });
+
+            // Όταν λαμβάνουμε το ηχητικό αρχείο από τον άλλον, το παίζουμε αμέσως
+            connection.on('data', (data) => {
+                statusDiv.innerText = "Λήψη ήχου...";
+                const audioUrl = URL.createObjectURL(data);
+                const audio = new Audio(audioUrl);
+                audio.play();
+                statusDiv.innerText = "Αναπαραγωγή ήχου... Ακούτε τον φίλο σας.";
             });
         }
 
-        // ΒΗΜΑ 3: Πραγματοποίηση κλήσης
-        callBtn.addEventListener('click', () => {
-            const remoteId = peerInput.value.trim();
-            if (!remoteId) return alert("Παρακαλώ βάλτε το ID του φίλου σας!");
+        // 4. Λειτουργία Κουμπιού (Push to Talk)
+        // Για υπολογιστές (κλικ με το ποντίκι)
+        talkBtn.addEventListener('mousedown', startRecording);
+        talkBtn.addEventListener('mouseup', stopRecording);
+        
+        // Για κινητά (άγγιγμα με το δάχτυλο)
+        talkBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startRecording(); });
+        talkBtn.addEventListener('touchend', stopRecording);
 
-            statusDiv.innerText = "Κλήση στον " + remoteId + "...";
-            const outgoingCall = peer.call(remoteId, myStream);
-            
-            outgoingCall.on('stream', (remoteStream) => {
-                document.getElementById('remote-audio').srcObject = remoteStream;
-                statusDiv.innerText = "Σε κλήση! Μπορείτε να μιλήσετε.";
-            });
-        });
+        function startRecording() {
+            if (!mediaRecorder) return;
+            audioChunks = [];
+            mediaRecorder.start();
+            statusDiv.innerText = "Σας ακούει... Μιλήστε τώρα!";
+            talkBtn.style.background = "#28a745";
+        }
+
+        function stopRecording() {
+            if (!mediaRecorder || mediaRecorder.state === "inactive") return;
+            mediaRecorder.stop();
+            talkBtn.style.background = "#dc3545";
+        }
     </script>
 </body>
 </html>
