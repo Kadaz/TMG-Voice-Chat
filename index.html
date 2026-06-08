@@ -5,9 +5,10 @@
 </head>
 <body>
 
-<h2>🎤 Mic Test (2 Tabs)</h2>
+<h2>🎤 Mic Test (Start / Leave)</h2>
 
 <button id="start">Start Mic</button>
+<button id="stop">Leave Voice</button>
 
 <audio id="audio" autoplay></audio>
 
@@ -20,6 +21,17 @@ document.getElementById("start").onclick = async () => {
   document.getElementById("audio").srcObject = stream;
 
   alert("Mic is ON");
+};
+
+document.getElementById("stop").onclick = () => {
+  if (stream) {
+    stream.getTracks().forEach(track => track.stop());
+    stream = null;
+  }
+
+  document.getElementById("audio").srcObject = null;
+
+  alert("You left voice chat");
 };
 </script>
 
