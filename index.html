@@ -8,39 +8,96 @@
 
 <h2>🎧 Voice Chat</h2>
 
-<input id="room" placeholder="Room name" />
+<input id="room" placeholder="Room ID" />
 <button onclick="join()">Join</button>
 
 <p id="status">idle</p>
 
-<script src="https://unpkg.com/@daily-co/daily-js"></script>
+<audio id="audio" autoplay></audio>
 
-<script>
-let call;
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import {
+  getDatabase,
+  ref,
+  set,
+  onValue
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+const firebaseConfig = {
+  databaseURL: "https://webrtc-signaling-default-rtdb.firebaseio.com"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+let pc;
+let roomId;
+
+const config = {
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" }
+  ]
+};
 
 async function join() {
-  const room = document.getElementById("room").value;
-  if (!room) return;
+  roomId = document.getElementById("room").value;
+  if (!roomId) return;
 
   document.getElementById("status").innerText = "connecting...";
 
-  // public demo domain (no setup)
-  const url = "https://demo.daily.co/" + room;
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-  call = window.DailyIframe.createFrame({
-    iframeStyle: {
-      position: "fixed",
-      top: 0,
-      left: 0,
-      width: "100%",
-      height: "100%",
-      border: "0"
+  pc = new RTCPeerConnection(config);
+
+  stream.getTracks().forEach(t => pc.addTrack(t, stream));
+
+  pc.ontrack = (e) => {
+    document.getElementById("audio").srcObject = e.streams[0];
+  };
+
+  const roomRef = ref(db, "rooms/" + roomId);
+
+  pc.onicecandidate = (e) => {
+    if (e.candidate) {
+      set(ref(db, "rooms/" + roomId + "/ice"), JSON.stringify(e.candidate));
+    }
+  };
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  set(ref(db, "rooms/" + roomId + "/offer"), JSON.stringify(offer));
+
+  onValue(roomRef, async (snap) => {
+    const data = snap.val();
+    if (!data) return;
+
+    if (data.answer && !pc.currentRemoteDescription) {
+      await pc.setRemoteDescription(JSON.parse(data.answer));
+      document.getElementById("status").innerText = "connected";
+    }
+
+    if (data.ice && pc.remoteDescription) {
+      try {
+        await pc.addIceCandidate(JSON.parse(data.ice));
+      } catch {}
     }
   });
 
-  call.join({ url });
+  onValue(ref(db, "rooms/" + roomId + "/offer"), async (snap) => {
+    const offer = snap.val();
+    if (!offer || pc.currentRemoteDescription) return;
 
-  document.getElementById("status").innerText = "connected";
+    await pc.setRemoteDescription(JSON.parse(offer));
+
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+
+    set(ref(db, "rooms/" + roomId + "/answer"), JSON.stringify(answer));
+  });
+
+  document.getElementById("status").innerText = "ready";
 }
 </script>
 
