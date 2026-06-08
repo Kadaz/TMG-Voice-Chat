@@ -2,86 +2,96 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Simple Voice Chat</title>
+  <title>Voice Chat</title>
 </head>
-<body style="font-family: Arial; text-align:center; padding-top:40px;">
+<body style="font-family:Arial; text-align:center; padding-top:40px;">
 
 <h2>🎧 Voice Chat</h2>
 
-<input id="room" placeholder="Room ID (ίδιο και στους 2)" />
-<button onclick="start()">Join</button>
+<input id="room" placeholder="Room ID" />
+<button onclick="join()">Join</button>
 
 <p id="status">idle</p>
 
-<script>
-let pc;
-let localStream;
-let socket = null;
+<audio id="audio" autoplay></audio>
 
-// PUBLIC STUN (αυτό κάνει τη μαγεία)
-const config = {
-  iceServers: [
-    { urls: "stun:stun.l.google.com:19302" }
-  ]
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "demo",
+  databaseURL: "https://webrtc-demo-default-rtdb.firebaseio.com"
 };
 
-async function start() {
-  const room = document.getElementById("room").value;
-  if (!room) return alert("βάλε room id");
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
 
-  document.getElementById("status").innerText = "getting mic...";
+let pc;
+let roomId;
 
-  localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+const config = {
+  iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+};
+
+async function join() {
+  roomId = document.getElementById("room").value;
+  if (!roomId) return;
+
+  document.getElementById("status").innerText = "connecting...";
+
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
   pc = new RTCPeerConnection(config);
 
-  localStream.getTracks().forEach(track => {
-    pc.addTrack(track, localStream);
-  });
+  stream.getTracks().forEach(t => pc.addTrack(t, stream));
 
-  pc.ontrack = (event) => {
-    const audio = document.createElement("audio");
-    audio.srcObject = event.streams[0];
-    audio.autoplay = true;
-    document.body.appendChild(audio);
+  pc.ontrack = (e) => {
+    document.getElementById("audio").srcObject = e.streams[0];
   };
 
-  pc.onicecandidate = async (event) => {
-    if (event.candidate) {
-      localStorage.setItem("ice_" + room, JSON.stringify(event.candidate));
+  const roomRef = ref(db, "rooms/" + roomId);
+
+  pc.onicecandidate = (e) => {
+    if (e.candidate) {
+      set(ref(db, "rooms/" + roomId + "/candidate"), JSON.stringify(e.candidate));
     }
   };
 
-  // FAKE signaling μέσω localStorage (ναι, hack αλλά WORKS σε 2 tabs/2 PCs με sync)
-  if (location.hash === "#caller") {
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
 
-    localStorage.setItem("offer_" + room, JSON.stringify(offer));
-    document.getElementById("status").innerText = "offer created";
-  } else {
-    const offer = JSON.parse(localStorage.getItem("offer_" + room));
-    if (!offer) return alert("No offer found. Open caller first.");
+  set(ref(db, "rooms/" + roomId + "/offer"), JSON.stringify(offer));
 
-    await pc.setRemoteDescription(offer);
+  onValue(roomRef, async (snap) => {
+    const data = snap.val();
+    if (!data) return;
+
+    if (data.answer && !pc.currentRemoteDescription) {
+      await pc.setRemoteDescription(JSON.parse(data.answer));
+      document.getElementById("status").innerText = "connected";
+    }
+
+    if (data.candidate) {
+      try {
+        await pc.addIceCandidate(JSON.parse(data.candidate));
+      } catch {}
+    }
+  });
+
+  onValue(ref(db, "rooms/" + roomId + "/offer"), async (snap) => {
+    const offer = snap.val();
+    if (!offer || pc.currentRemoteDescription) return;
+
+    await pc.setRemoteDescription(JSON.parse(offer));
 
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
 
-    localStorage.setItem("answer_" + room, JSON.stringify(answer));
-    document.getElementById("status").innerText = "answer created";
-  }
+    set(ref(db, "rooms/" + roomId + "/answer"), JSON.stringify(answer));
+  });
 
-  // polling answer/offer
-  setInterval(async () => {
-    const room = document.getElementById("room").value;
-
-    const answer = localStorage.getItem("answer_" + room);
-    if (answer && !pc.currentRemoteDescription && location.hash === "#caller") {
-      await pc.setRemoteDescription(JSON.parse(answer));
-      document.getElementById("status").innerText = "connected";
-    }
-  }, 1000);
+  document.getElementById("status").innerText = "ready";
 }
 </script>
 
