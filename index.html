@@ -1,105 +1,91 @@
 <!DOCTYPE html>
-<html>
+<html lang="el">
 <head>
-  <meta charset="UTF-8">
-  <title>Voice Chat</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Voice Chat</title>
+    <!-- Εισαγωγή της βιβλιοθήκης PeerJS για P2P σύνδεση -->
+    <script src="https://unpkg.com"></script>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding: 50px; background: #f0f2f5; }
+        .box { background: white; padding: 30px; border-radius: 10px; inline-size: 300px; margin: 0 auto; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        button { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; margin-block-start: 10px; }
+        button:hover { background: #0056b3; }
+        input { padding: 10px; width: 80px; text-align: center; margin-block-end: 10px; }
+        #status { font-weight: bold; margin-block-start: 20px; color: #555; }
+    </style>
 </head>
-<body style="font-family:Arial; text-align:center; padding-top:40px;">
+<body>
 
-<h2>🎧 Voice Chat</h2>
+    <div class="box">
+        <h3>Voice Chat</h3>
+        
+        <p>Το ID σου: <span id="my-id" style="font-weight:bold; color:green;">...</span></p>
+        
+        <hr>
+        
+        <p>Σύνδεση με peer:</p>
+        <input type="text" id="peer-id" placeholder="ID φίλου">
+        <br>
+        <button id="call-btn">Κλήση (Ήχος)</button>
 
-<input id="room" placeholder="Room ID" />
-<button onclick="join()">Join</button>
+        <div id="status">Έτοιμο. Περιμένει σύνδεση...</div>
+    </div>
 
-<p id="status">idle</p>
+    <!-- Κρυφό στοιχείο για την αναπαραγωγή του ήχου του άλλου χρήστη -->
+    <audio id="remote-audio" autoplay></audio>
 
-<audio id="audio" autoplay></audio>
+    <script>
+        // Δημιουργία τυχαίου 4ψήφιου ID για απλότητα
+        const myId = Math.floor(1000 + Math.random() * 9000).toString();
+        document.getElementById('my-id').innerText = myId;
 
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import {
-  getDatabase,
-  ref,
-  set,
-  onValue
-} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+        // Σύνδεση στον δωρεάν server της PeerJS
+        const peer = new Peer(myId);
+        const statusDiv = document.getElementById('status');
 
-const firebaseConfig = {
-  databaseURL: "https://webrtc-signaling-default-rtdb.firebaseio.com"
-};
+        // 1. Υποδοχή εισερχόμενης κλήσης
+        peer.on('call', (call) => {
+            statusDiv.innerText = "Εισερχόμενη κλήση... Σύνδεση μικροφώνου...";
+            
+            navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+                .then((stream) => {
+                    call.answer(stream); // Απάντηση με το δικό μας μικρόφωνο
+                    statusDiv.innerText = "Σε κλήση! (Μιλήστε)";
+                    
+                    // Λήψη ήχου του άλλου
+                    call.on('stream', (remoteStream) => {
+                        document.getElementById('remote-audio').srcObject = remoteStream;
+                    });
+                })
+                .catch(err => {
+                    statusDiv.innerText = "Σφάλμα πρόσβασης στο μικρόφωνο.";
+                    console.error(err);
+                });
+        });
 
-const app = initializeApp(firebaseConfig);
-const db = getDatabase(app);
+        // 2. Πραγματοποίηση εξερχόμενης κλήσης (Όταν πατάμε το κουμπί)
+        document.getElementById('call-btn').addEventListener('click', () => {
+            const remoteId = document.getElementById('peer-id').value;
+            if (!remoteId) return alert("Βάλε το ID του φίλου σου!");
 
-let pc;
-let roomId;
+            statusDiv.innerText = "Κλήση στον " + remoteId + "...";
 
-const config = {
-  iceServers: [
-    { urls: "stun:stun.l.google.com:19302" }
-  ]
-};
-
-async function join() {
-  roomId = document.getElementById("room").value;
-  if (!roomId) return;
-
-  document.getElementById("status").innerText = "connecting...";
-
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-  pc = new RTCPeerConnection(config);
-
-  stream.getTracks().forEach(t => pc.addTrack(t, stream));
-
-  pc.ontrack = (e) => {
-    document.getElementById("audio").srcObject = e.streams[0];
-  };
-
-  const roomRef = ref(db, "rooms/" + roomId);
-
-  pc.onicecandidate = (e) => {
-    if (e.candidate) {
-      set(ref(db, "rooms/" + roomId + "/ice"), JSON.stringify(e.candidate));
-    }
-  };
-
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-
-  set(ref(db, "rooms/" + roomId + "/offer"), JSON.stringify(offer));
-
-  onValue(roomRef, async (snap) => {
-    const data = snap.val();
-    if (!data) return;
-
-    if (data.answer && !pc.currentRemoteDescription) {
-      await pc.setRemoteDescription(JSON.parse(data.answer));
-      document.getElementById("status").innerText = "connected";
-    }
-
-    if (data.ice && pc.remoteDescription) {
-      try {
-        await pc.addIceCandidate(JSON.parse(data.ice));
-      } catch {}
-    }
-  });
-
-  onValue(ref(db, "rooms/" + roomId + "/offer"), async (snap) => {
-    const offer = snap.val();
-    if (!offer || pc.currentRemoteDescription) return;
-
-    await pc.setRemoteDescription(JSON.parse(offer));
-
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-
-    set(ref(db, "rooms/" + roomId + "/answer"), JSON.stringify(answer));
-  });
-
-  document.getElementById("status").innerText = "ready";
-}
-</script>
-
+            navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+                .then((stream) => {
+                    const call = peer.call(remoteId, stream);
+                    statusDiv.innerText = "Σε κλήση! (Μιλήστε)";
+                    
+                    // Λήψη ήχου του άλλου
+                    call.on('stream', (remoteStream) => {
+                        document.getElementById('remote-audio').srcObject = remoteStream;
+                    });
+                })
+                .catch(err => {
+                    statusDiv.innerText = "Σφάλμα πρόσβασης στο μικρόφωνο.";
+                    console.error(err);
+                });
+        });
+    </script>
 </body>
 </html>
