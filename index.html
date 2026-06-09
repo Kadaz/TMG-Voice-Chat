@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>TMG Voice Chat + Firebase</title>
+<title>TMG Voice Chat v3</title>
 
 <style>
 body {
@@ -57,7 +57,7 @@ input, button {
 
 <body>
 
-<h2>TMG Voice Chat</h2>
+<h2>TMG Voice Chat v3</h2>
 
 <input id="username" placeholder="Username">
 <input id="room" value="main" placeholder="Room">
@@ -85,8 +85,11 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
 import {
   getDatabase,
   ref,
+  set,
+  remove,
   push,
-  onChildAdded
+  onChildAdded,
+  onValue
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
 const firebaseConfig = {
@@ -111,6 +114,7 @@ const chatInput = document.getElementById("chatInput");
 const usersEl = document.getElementById("users");
 
 let user = "";
+let myUserRef = null;
 
 function addMsg(u, text) {
   const div = document.createElement("div");
@@ -141,14 +145,17 @@ onChildAdded(chatRef, (snap) => {
   addMsg(msg.user, msg.text);
 });
 
-// USERS ONLINE
-onChildAdded(usersRef, (snap) => {
-  const u = snap.val();
+// USERS LIVE (REAL)
+onValue(usersRef, (snap) => {
+  const data = snap.val() || {};
 
-  const div = document.createElement("div");
-  div.textContent = "🟢 " + u.name;
+  usersEl.innerHTML = "";
 
-  usersEl.appendChild(div);
+  Object.values(data).forEach((u) => {
+    const div = document.createElement("div");
+    div.textContent = "🟢 " + u.name;
+    usersEl.appendChild(div);
+  });
 });
 
 // ================= SKYWAY =================
@@ -201,12 +208,20 @@ document.getElementById("join").onclick = async () => {
 
   log("My ID: " + me.id);
 
-  // publish user online
-  push(usersRef, {
+  // ================= USERS ONLINE =================
+  myUserRef = ref(db, "users/" + username);
+
+  set(myUserRef, {
     name: username,
+    online: true,
     time: Date.now()
   });
 
+  window.addEventListener("beforeunload", () => {
+    remove(myUserRef);
+  });
+
+  // ================= VOICE =================
   const subscribe = async (publication) => {
     if (publication.publisher.id === me.id) return;
 
