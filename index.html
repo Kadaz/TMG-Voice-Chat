@@ -1,63 +1,109 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>Working Voice Chat</title>
+<meta charset="UTF-8">
+<title>TMG Voice Chat</title>
 </head>
 <body>
 
-<h2>VOICE CHAT</h2>
+<h2>TMG Voice Chat</h2>
 
-<input id="room" placeholder="room id">
-<button onclick="start()">Join</button>
+<input id="username" placeholder="Username">
+<input id="roomname" placeholder="Room Name" value="main">
+<button id="join">Join</button>
 
-<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<div>
+  <b>My ID:</b>
+  <span id="myid">-</span>
+</div>
+
+<div id="users"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@skyway-sdk/room/dist/skyway_room-latest.js"></script>
 
 <script>
-let peer;
-let calls = {};
-let stream;
 
-async function getMic(){
-  stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-}
+const APP_ID = "96d919fc-9c10-424b-9e4e-1addf4de2563";
+const SECRET = "dHmHOdbLzFx1Kr7YtKc7P7HPOcWgHHPN0RcyYr7AFsk=";
 
-function startPeer(id){
-  peer = new Peer(id, {
-    host: 'peerjs.com',
-    secure: true,
-    port: 443
-  });
+const joinBtn = document.getElementById("join");
+const roomInput = document.getElementById("roomname");
+const usernameInput = document.getElementById("username");
+const myIdEl = document.getElementById("myid");
+const usersEl = document.getElementById("users");
 
-  peer.on('open', id => {
-    console.log("My ID:", id);
-  });
+joinBtn.onclick = async () => {
 
-  peer.on('call', call => {
-    call.answer(stream);
+  const username = usernameInput.value.trim();
+  const roomName = roomInput.value.trim();
 
-    call.on('stream', remoteStream => {
-      const audio = document.createElement('audio');
-      audio.autoplay = true;
-      audio.srcObject = remoteStream;
-      document.body.appendChild(audio);
+  if (!username || !roomName) {
+    alert("Username and Room required");
+    return;
+  }
+
+  const context =
+    await skyway_room.SkyWayContext.CreateForDevelopment(
+      APP_ID,
+      SECRET
+    );
+
+  const room =
+    await skyway_room.SkyWayRoom.FindOrCreate(
+      context,
+      {
+        name: roomName
+      }
+    );
+
+  const audio =
+    await skyway_room.SkyWayStreamFactory
+      .createMicrophoneAudioStream();
+
+  const me =
+    await room.join({
+      name: username
     });
+
+  myIdEl.textContent = me.id;
+
+  await me.publish(audio, {
+    type: "p2p"
   });
-}
 
-async function start(){
-  const room = document.getElementById("room").value;
+  const subscribePublication = async (publication) => {
 
-  await getMic();
-  startPeer(room);
+    if (publication.publisher.id === me.id) {
+      return;
+    }
 
-  setTimeout(() => {
-    Object.keys(peer._connections).forEach(id => {
-      const call = peer.call(id, stream);
-      calls[id] = call;
-    });
-  }, 1500);
-}
+    const { stream } =
+      await me.subscribe(publication.id);
+
+    const audioElement =
+      document.createElement("audio");
+
+    audioElement.autoplay = true;
+
+    stream.attach(audioElement);
+
+    document.body.appendChild(audioElement);
+  };
+
+  room.publications.forEach(
+    subscribePublication
+  );
+
+  room.onStreamPublished.add((e) => {
+    subscribePublication(e.publication);
+  });
+
+  usersEl.innerHTML =
+    "<p>Connected to room: " +
+    roomName +
+    "</p>";
+};
+
 </script>
 
 </body>
