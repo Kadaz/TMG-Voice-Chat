@@ -2,10 +2,9 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>TMG Voice Chat v4 Stable</title>
+<title>TMG Voice Chat v5.2 Private Calls</title>
 
-<!-- ✅ FAVICON -->
-<link rel="icon" type="image/x-icon" href="favicon.ico">
+<link rel="icon" href="favicon.ico">
 
 <style>
 body {
@@ -27,7 +26,6 @@ input, button {
 
 #status {
   font-weight: bold;
-  margin-top: 10px;
 }
 
 #users, #chatBox {
@@ -42,11 +40,22 @@ body.dark #chatBox {
   background: #2a2a2a;
 }
 
+.userRow {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+}
+
+.callBtn {
+  cursor: pointer;
+  font-size: 12px;
+  color: blue;
+}
+
 #chatBox {
+  height: 220px;
   display: flex;
   flex-direction: column;
-  height: 260px;
-  border: 1px solid #ddd;
 }
 
 #messages {
@@ -60,20 +69,14 @@ body.dark #chatBox {
   padding: 10px;
 }
 
-.system {
-  color: gray;
-  font-style: italic;
-}
-
-.msg {
-  margin: 3px 0;
-}
+.system { color: gray; font-style: italic; }
+.msg { margin: 3px 0; }
 </style>
 </head>
 
 <body>
 
-<h2>TMG Voice Chat v4</h2>
+<h2>TMG Voice Chat v5.2</h2>
 
 <input id="username" placeholder="Username">
 <input id="room" value="main">
@@ -81,7 +84,8 @@ body.dark #chatBox {
 <button id="join">Join</button>
 <button id="mute">Mute</button>
 <button id="leave">Leave</button>
-<button id="dark">Dark Mode</button>
+<button id="dark">Dark</button>
+<button id="backMain" style="display:none;">Back to Main</button>
 
 <div id="status">Idle</div>
 
@@ -89,10 +93,9 @@ body.dark #chatBox {
 <div id="users"></div>
 
 <h3>Chat</h3>
-
 <div id="chatBox">
   <div id="messages"></div>
-  <input id="chatInput" placeholder="type message + Enter">
+  <input id="chatInput" placeholder="message + Enter">
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@skyway-sdk/room/dist/skyway_room-latest.js"></script>
@@ -127,7 +130,6 @@ const chatRef = ref(db, "chat");
 const usersRef = ref(db, "users");
 
 const messagesEl = document.getElementById("messages");
-const chatInput = document.getElementById("chatInput");
 const usersEl = document.getElementById("users");
 const statusEl = document.getElementById("status");
 
@@ -137,103 +139,80 @@ let myUserRef = null;
 let room = null;
 let me = null;
 let mic = null;
-let isMuted = false;
+
+let currentRoomName = "main";
 
 // ================= STATUS =================
-function setStatus(text) {
-  statusEl.innerText = text;
-}
+function setStatus(t){ statusEl.innerText = t; }
 
 // ================= CHAT =================
-function addMsg(text, type="msg") {
-  const div = document.createElement("div");
-  div.className = type;
-  div.textContent = text;
-  messagesEl.appendChild(div);
+function addMsg(t, type="msg"){
+  const d = document.createElement("div");
+  d.className = type;
+  d.textContent = t;
+  messagesEl.appendChild(d);
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
-chatInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    const text = chatInput.value.trim();
-    if (!text) return;
-
-    push(chatRef, {
-      user,
-      text,
-      type: "msg",
-      time: Date.now()
-    });
-
-    chatInput.value = "";
-  }
-});
-
-onChildAdded(chatRef, (snap) => {
-  const msg = snap.val();
-
-  if (msg.type === "system") {
-    addMsg("• " + msg.text, "system");
-  } else {
-    addMsg(msg.user + ": " + msg.text);
-  }
-});
-
-// ================= USERS =================
-onValue(usersRef, (snap) => {
+// ================= USERS LIST =================
+onValue(usersRef, (snap)=>{
   const data = snap.val() || {};
   usersEl.innerHTML = "";
 
-  Object.values(data).forEach(u => {
-    const div = document.createElement("div");
-    div.textContent = "🟢 " + u.name;
-    usersEl.appendChild(div);
+  Object.entries(data).forEach(([id,u])=>{
+    const row = document.createElement("div");
+    row.className = "userRow";
+
+    row.innerHTML = `
+      <span>🟢 ${u.name}</span>
+      <span class="callBtn" data-name="${u.name}">call</span>
+    `;
+
+    usersEl.appendChild(row);
+  });
+
+  document.querySelectorAll(".callBtn").forEach(btn=>{
+    btn.onclick = () => startPrivateCall(btn.dataset.name);
   });
 });
 
-// ================= JOIN =================
-document.getElementById("join").onclick = async () => {
+// ================= SKYWAY JOIN =================
+document.getElementById("join").onclick = async ()=>{
 
   setStatus("Connecting...");
 
-  const username = document.getElementById("username").value.trim();
+  user = document.getElementById("username").value.trim();
   const roomName = document.getElementById("room").value.trim();
 
-  if (!username) return;
+  if(!user) return;
 
-  user = username;
+  currentRoomName = roomName;
 
   const context = await skyway_room.SkyWayContext.CreateForDevelopment(
     "96d919fc-9c10-424b-9e4e-1addf4de2563",
     "dHmHOdbLzFx1Kr7YtKc7P7HPOcWgHHPN0RcyYr7AFsk="
   );
 
-  room = await skyway_room.SkyWayRoom.FindOrCreate(
-    context,
-    { name: roomName }
-  );
+  room = await skyway_room.SkyWayRoom.FindOrCreate(context,{name:roomName});
 
   mic = await skyway_room.SkyWayStreamFactory.createMicrophoneAudioStream();
 
-  me = await room.join({ name: username });
-
-  await me.publish(mic, { type: "p2p" });
+  me = await room.join({name:user});
+  await me.publish(mic,{type:"p2p"});
 
   setStatus("Connected ✔");
 
-  addMsg("• " + username + " joined", "system");
+  myUserRef = ref(db,"users/"+user);
 
-  myUserRef = ref(db, "users/" + username);
-
-  set(myUserRef, {
-    name: username,
-    time: Date.now()
+  set(myUserRef,{
+    name:user,
+    room:roomName
   });
 
-  const subscribe = async (pub) => {
-    if (pub.publisher.id === me.id) return;
+  const subscribe = async(pub)=>{
+    if(pub.publisher.id===me.id) return;
 
-    const { stream } = await me.subscribe(pub.id);
+    const {stream} = await me.subscribe(pub.id);
 
     const audio = document.createElement("audio");
     audio.autoplay = true;
@@ -243,33 +222,77 @@ document.getElementById("join").onclick = async () => {
   };
 
   room.publications.forEach(subscribe);
-  room.onStreamPublished.add(e => subscribe(e.publication));
+  room.onStreamPublished.add(e=>subscribe(e.publication));
 };
 
-// ================= MUTE =================
-document.getElementById("mute").onclick = () => {
-  if (!mic) return;
+// ================= PRIVATE CALL =================
+async function startPrivateCall(targetUser){
 
-  isMuted = !isMuted;
+  const privateRoom = "dm-" + [user,targetUser].sort().join("-");
 
-  const track = mic.stream.getAudioTracks()[0];
-  if (track) track.enabled = !isMuted;
+  setStatus("Calling " + targetUser + "...");
 
-  document.getElementById("mute").innerText =
-    isMuted ? "🔇 Unmute" : "🎤 Mute";
-};
+  if(room) await room.leave();
 
-// ================= LEAVE =================
-document.getElementById("leave").onclick = () => {
-  setStatus("Disconnected");
+  const context = await skyway_room.SkyWayContext.CreateForDevelopment(
+    "96d919fc-9c10-424b-9e4e-1addf4de2563",
+    "dHmHOdbLzFx1Kr7YtKc7P7HPOcWgHHPN0RcyYr7AFsk="
+  );
 
-  if (myUserRef) remove(myUserRef);
+  room = await skyway_room.SkyWayRoom.FindOrCreate(context,{
+    name: privateRoom
+  });
+
+  me = await room.join({name:user});
+
+  mic = await skyway_room.SkyWayStreamFactory.createMicrophoneAudioStream();
+  await me.publish(mic,{type:"p2p"});
+
+  setStatus("Private call with " + targetUser);
+
+  document.getElementById("backMain").style.display="inline-block";
+
+  const subscribe = async(pub)=>{
+    if(pub.publisher.id===me.id) return;
+
+    const {stream} = await me.subscribe(pub.id);
+
+    const audio = document.createElement("audio");
+    audio.autoplay = true;
+
+    stream.attach(audio);
+    document.body.appendChild(audio);
+  };
+
+  room.publications.forEach(subscribe);
+  room.onStreamPublished.add(e=>subscribe(e.publication));
+}
+
+// ================= BACK TO MAIN =================
+document.getElementById("backMain").onclick = async ()=>{
 
   location.reload();
 };
 
+// ================= MUTE =================
+document.getElementById("mute").onclick = ()=>{
+  if(!mic) return;
+
+  const track = mic.stream.getAudioTracks()[0];
+  track.enabled = !track.enabled;
+
+  document.getElementById("mute").innerText =
+    track.enabled ? "Mute" : "Unmute";
+};
+
+// ================= LEAVE =================
+document.getElementById("leave").onclick = ()=>{
+  if(myUserRef) remove(myUserRef);
+  location.reload();
+};
+
 // ================= DARK MODE =================
-document.getElementById("dark").onclick = () => {
+document.getElementById("dark").onclick = ()=>{
   document.body.classList.toggle("dark");
 };
 
