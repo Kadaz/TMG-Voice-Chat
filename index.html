@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>TMG Voice Chat - Discord Mode</title>
+<title>TMG Voice Chat - Discord Mode v1</title>
 
 <style>
 body {
@@ -12,13 +12,8 @@ body {
   gap: 20px;
 }
 
-#left {
-  width: 300px;
-}
-
-#right {
-  flex: 1;
-}
+#left { width: 300px; }
+#right { flex: 1; }
 
 input, button {
   padding: 8px;
@@ -32,10 +27,10 @@ input, button {
 }
 
 #users {
-  margin-top: 10px;
-  padding: 10px;
   border: 1px solid #ddd;
-  min-height: 100px;
+  min-height: 120px;
+  padding: 10px;
+  margin-top: 10px;
 }
 
 .user {
@@ -104,15 +99,27 @@ input, button {
 const APP_ID = "96d919fc-9c10-424b-9e4e-1addf4de2563";
 const SECRET = "dHmHOdbLzFx1Kr7YtKc7P7HPOcWgHHPN0RcyYr7AFsk=";
 
+let context;
 let room;
 let me;
 let mic;
+
 let users = {};
-let pushToTalk = false;
 
 const statusEl = document.getElementById("status");
 const usersEl = document.getElementById("users");
 const messagesEl = document.getElementById("messages");
+
+function renderUsers() {
+  usersEl.innerHTML = "";
+
+  Object.entries(users).forEach(([id, name]) => {
+    const div = document.createElement("div");
+    div.className = "user";
+    div.innerText = name + " (" + id.slice(0,4) + ")";
+    usersEl.appendChild(div);
+  });
+}
 
 function logChat(user, text) {
   const div = document.createElement("div");
@@ -120,20 +127,6 @@ function logChat(user, text) {
   div.innerText = user + ": " + text;
   messagesEl.appendChild(div);
   messagesEl.scrollTop = messagesEl.scrollHeight;
-}
-
-function renderUsers() {
-  usersEl.innerHTML = "";
-  Object.values(users).forEach(name => {
-    const div = document.createElement("div");
-    div.className = "user";
-    div.innerText = name;
-    usersEl.appendChild(div);
-  });
-}
-
-function sendChat(text) {
-  room.send({ type: "chat", data: text });
 }
 
 document.getElementById("join").onclick = async () => {
@@ -146,7 +139,7 @@ document.getElementById("join").onclick = async () => {
 
   statusEl.innerText = "Connecting...";
 
-  const context = await skyway_room.SkyWayContext.CreateForDevelopment(
+  context = await skyway_room.SkyWayContext.CreateForDevelopment(
     APP_ID,
     SECRET
   );
@@ -168,7 +161,7 @@ document.getElementById("join").onclick = async () => {
 
   statusEl.innerText = "Connected ✔";
 
-  // ---------------- AUDIO ----------------
+  // ---------------- VOICE ----------------
   const subscribe = async (pub) => {
 
     if (pub.publisher.id === me.id) return;
@@ -179,37 +172,65 @@ document.getElementById("join").onclick = async () => {
     audio.autoplay = true;
 
     stream.attach(audio);
-    document.body.appendChild(audio);
 
+    document.body.appendChild(audio);
   };
 
   room.publications.forEach(subscribe);
   room.onStreamPublished.add(e => subscribe(e.publication));
 
-  // ---------------- CHAT ----------------
-  room.onDataChannelMessage?.add?.((e) => {
-    if (e.data?.type === "chat") {
-      logChat(e.src.name || "user", e.data.data);
+  // ---------------- CHAT + DATA ----------------
+  me.onDataStream?.add((event) => {
+
+    const msg = event.data;
+
+    if (!msg) return;
+
+    // CHAT
+    if (msg.type === "chat") {
+      logChat(msg.data.user, msg.data.text);
+    }
+
+    // USER JOIN
+    if (msg.type === "user-join") {
+      users[msg.data.id] = msg.data.name;
+      renderUsers();
+    }
+
+    // USER LEAVE
+    if (msg.type === "user-leave") {
+      delete users[msg.data.id];
+      renderUsers();
     }
   });
 
-  // fallback chat (SkyWay sometimes uses send/receive)
-  room.onDataChannelMessage = room.onDataChannelMessage || ((e) => {
-    if (e.data?.type === "chat") {
-      logChat(e.src.name || "user", e.data.data);
+  // broadcast join
+  me.sendData({
+    type: "user-join",
+    data: {
+      id: me.id,
+      name: username
     }
   });
 
 };
 
-// ENTER CHAT
+// ---------------- CHAT INPUT ----------------
 document.getElementById("chatInput").addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
+
     const text = e.target.value.trim();
     if (!text) return;
 
     logChat("me", text);
-    room.send({ type: "chat", data: text });
+
+    me.sendData({
+      type: "chat",
+      data: {
+        user: me.id,
+        text
+      }
+    });
 
     e.target.value = "";
   }
