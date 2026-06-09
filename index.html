@@ -2,50 +2,100 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>TMG Voice Chat</title>
+<title>TMG Voice Chat - Discord Mode</title>
 
 <style>
 body {
   font-family: Arial;
   padding: 20px;
+  display: flex;
+  gap: 20px;
+}
+
+#left {
+  width: 300px;
+}
+
+#right {
+  flex: 1;
 }
 
 input, button {
   padding: 8px;
-  margin: 5px;
+  margin: 5px 0;
+  width: 100%;
 }
 
 #status {
-  margin-top: 10px;
   font-weight: bold;
+  margin-top: 10px;
 }
 
-#log {
-  font-size: 13px;
-  color: #444;
+#users {
   margin-top: 10px;
-  white-space: pre-line;
+  padding: 10px;
+  border: 1px solid #ddd;
+  min-height: 100px;
 }
 
-audio {
-  display: block;
-  margin-top: 10px;
+.user {
+  padding: 5px;
+  border-bottom: 1px solid #eee;
+}
+
+#chatBox {
+  border: 1px solid #ddd;
+  height: 400px;
+  display: flex;
+  flex-direction: column;
+}
+
+#messages {
+  flex: 1;
+  padding: 10px;
+  overflow-y: auto;
+}
+
+#chatInput {
+  border: none;
+  border-top: 1px solid #ddd;
+  padding: 10px;
+}
+
+.msg {
+  margin-bottom: 5px;
 }
 </style>
 </head>
 
 <body>
 
-<h2>TMG Voice Chat</h2>
+<div id="left">
+
+<h3>Voice</h3>
 
 <input id="username" placeholder="Username">
-<input id="room" value="main" placeholder="Room">
+<input id="room" value="main">
+
 <button id="join">Join</button>
 
 <div id="status">Idle</div>
-<div id="log"></div>
 
-<hr>
+<h3>Users</h3>
+<div id="users"></div>
+
+</div>
+
+<div id="right">
+
+<h3>Chat</h3>
+
+<div id="chatBox">
+  <div id="messages"></div>
+  <input id="chatInput" placeholder="type message + Enter">
+</div>
+
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/@skyway-sdk/room/dist/skyway_room-latest.js"></script>
 
@@ -54,116 +104,129 @@ audio {
 const APP_ID = "96d919fc-9c10-424b-9e4e-1addf4de2563";
 const SECRET = "dHmHOdbLzFx1Kr7YtKc7P7HPOcWgHHPN0RcyYr7AFsk=";
 
-let context;
 let room;
 let me;
+let mic;
+let users = {};
+let pushToTalk = false;
 
 const statusEl = document.getElementById("status");
-const logEl = document.getElementById("log");
+const usersEl = document.getElementById("users");
+const messagesEl = document.getElementById("messages");
 
-function log(msg) {
-  console.log(msg);
-  logEl.innerHTML += msg + "<br>";
+function logChat(user, text) {
+  const div = document.createElement("div");
+  div.className = "msg";
+  div.innerText = user + ": " + text;
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
-function setStatus(msg) {
-  statusEl.innerText = msg;
-  log(msg);
+function renderUsers() {
+  usersEl.innerHTML = "";
+  Object.values(users).forEach(name => {
+    const div = document.createElement("div");
+    div.className = "user";
+    div.innerText = name;
+    usersEl.appendChild(div);
+  });
+}
+
+function sendChat(text) {
+  room.send({ type: "chat", data: text });
 }
 
 document.getElementById("join").onclick = async () => {
 
-  const usernameInput = document.getElementById("username").value.trim();
-  const roomName = document.getElementById("room").value.trim();
-
   const username =
-    usernameInput ||
+    document.getElementById("username").value.trim() ||
     ("user-" + Math.random().toString(16).slice(2));
 
-  try {
+  const roomName = document.getElementById("room").value.trim();
 
-    setStatus("Creating context...");
+  statusEl.innerText = "Connecting...";
 
-    context = await skyway_room.SkyWayContext.CreateForDevelopment(
-      APP_ID,
-      SECRET
-    );
+  const context = await skyway_room.SkyWayContext.CreateForDevelopment(
+    APP_ID,
+    SECRET
+  );
 
-    setStatus("Loading room...");
+  room = await skyway_room.SkyWayRoom.FindOrCreate(
+    context,
+    { name: roomName }
+  );
 
-    room = await skyway_room.SkyWayRoom.FindOrCreate(
-      context,
-      { name: roomName }
-    );
+  mic = await skyway_room.SkyWayStreamFactory
+    .createMicrophoneAudioStream();
 
-    setStatus("Getting microphone...");
+  me = await room.join({ name: username });
 
-    const mic =
-      await skyway_room.SkyWayStreamFactory
-        .createMicrophoneAudioStream();
+  await me.publish(mic, { type: "p2p" });
 
-    setStatus("Joining room...");
+  users[me.id] = username;
+  renderUsers();
 
-    me = await room.join({ name: username });
+  statusEl.innerText = "Connected ✔";
 
-    setStatus("Publishing audio...");
+  // ---------------- AUDIO ----------------
+  const subscribe = async (pub) => {
 
-    await me.publish(mic, { type: "p2p" });
+    if (pub.publisher.id === me.id) return;
 
-    setStatus("Connected ✔");
+    const { stream } = await me.subscribe(pub.id);
 
-    log("My ID: " + me.id);
+    const audio = document.createElement("audio");
+    audio.autoplay = true;
 
-    // ----------------------------
-    // SAFE SUBSCRIBE (CORRECT SKYWAY WAY)
-    // ----------------------------
-    const subscribe = async (publication) => {
+    stream.attach(audio);
+    document.body.appendChild(audio);
 
-      if (publication.publisher.id === me.id) return;
+  };
 
-      try {
+  room.publications.forEach(subscribe);
+  room.onStreamPublished.add(e => subscribe(e.publication));
 
-        log("Subscribing: " + publication.publisher.id);
+  // ---------------- CHAT ----------------
+  room.onDataChannelMessage?.add?.((e) => {
+    if (e.data?.type === "chat") {
+      logChat(e.src.name || "user", e.data.data);
+    }
+  });
 
-        const { stream } = await me.subscribe(publication.id);
-
-        const audio = document.createElement("audio");
-
-        audio.autoplay = true;
-        audio.playsInline = true;
-        audio.controls = false;
-
-        // 🔥 SKYWAY CORRECT METHOD
-        stream.attach(audio);
-
-        document.body.appendChild(audio);
-
-        log("Audio attached ✔");
-
-      } catch (err) {
-        log("SUB ERROR: " + err.message);
-      }
-    };
-
-    // existing streams
-    room.publications.forEach(subscribe);
-
-    // new streams
-    room.onStreamPublished.add((e) => {
-      subscribe(e.publication);
-    });
-
-    // safety check
-    setTimeout(() => {
-      if (!me) setStatus("STUCK?");
-    }, 8000);
-
-  } catch (err) {
-    setStatus("ERROR: " + err.message);
-    log(err.stack || err);
-  }
+  // fallback chat (SkyWay sometimes uses send/receive)
+  room.onDataChannelMessage = room.onDataChannelMessage || ((e) => {
+    if (e.data?.type === "chat") {
+      logChat(e.src.name || "user", e.data.data);
+    }
+  });
 
 };
+
+// ENTER CHAT
+document.getElementById("chatInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    const text = e.target.value.trim();
+    if (!text) return;
+
+    logChat("me", text);
+    room.send({ type: "chat", data: text });
+
+    e.target.value = "";
+  }
+});
+
+// ---------------- PUSH TO TALK ----------------
+document.addEventListener("keydown", (e) => {
+  if (e.code === "Space" && mic) {
+    mic.enabled = true;
+  }
+});
+
+document.addEventListener("keyup", (e) => {
+  if (e.code === "Space" && mic) {
+    mic.enabled = false;
+  }
+});
 
 </script>
 
