@@ -2,26 +2,28 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>TMG Voice Chat</title>
+<title>TMG Voice Chat (Stable)</title>
+
 <style>
 body { font-family: Arial; padding: 20px; }
-input, button { margin: 5px; padding: 8px; }
-audio { display: block; margin-top: 10px; }
+input, button { padding: 8px; margin: 5px; }
+#log { margin-top: 10px; font-size: 13px; color: #444; }
+audio { display:block; margin-top: 5px; }
 </style>
 </head>
 
 <body>
 
-<h2>TMG Voice Chat</h2>
+<h2>TMG Voice Chat - Stable</h2>
 
 <input id="username" placeholder="Username">
-<input id="roomname" value="main" placeholder="Room">
+<input id="room" value="main" placeholder="Room">
 <button id="join">Join</button>
 
-<hr>
+<div id="status">Idle</div>
+<div id="log"></div>
 
-<div><b>My ID:</b> <span id="myid">-</span></div>
-<div id="status"></div>
+<hr>
 
 <script src="https://cdn.jsdelivr.net/npm/@skyway-sdk/room/dist/skyway_room-latest.js"></script>
 
@@ -30,89 +32,120 @@ audio { display: block; margin-top: 10px; }
 const APP_ID = "96d919fc-9c10-424b-9e4e-1addf4de2563";
 const SECRET = "dHmHOdbLzFx1Kr7YtKc7P7HPOcWgHHPN0RcyYr7AFsk=";
 
-const joinBtn = document.getElementById("join");
-const myIdEl = document.getElementById("myid");
-const statusEl = document.getElementById("status");
-
 let context;
 let room;
 let me;
 
-joinBtn.onclick = async () => {
+const statusEl = document.getElementById("status");
+const logEl = document.getElementById("log");
+
+function log(msg) {
+  console.log(msg);
+  logEl.innerHTML += msg + "<br>";
+}
+
+function setStatus(msg) {
+  statusEl.innerText = msg;
+  log(msg);
+}
+
+async function wait(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+document.getElementById("join").onclick = async () => {
 
   const username = document.getElementById("username").value.trim();
-  const roomName = document.getElementById("roomname").value.trim();
+  const roomName = document.getElementById("room").value.trim();
 
   if (!username || !roomName) {
     alert("Fill username + room");
     return;
   }
 
-  statusEl.innerText = "Connecting...";
+  try {
 
-  // 🔥 SkyWay context (development mode)
-  context = await skyway_room.SkyWayContext.CreateForDevelopment(
-    APP_ID,
-    SECRET
-  );
+    setStatus("Creating context...");
 
-  // Room create / join
-  room = await skyway_room.SkyWayRoom.FindOrCreate(
-    context,
-    { name: roomName }
-  );
+    context = await skyway_room.SkyWayContext.CreateForDevelopment(
+      APP_ID,
+      SECRET
+    );
 
-  // mic
-  const audioStream =
-    await skyway_room.SkyWayStreamFactory.createMicrophoneAudioStream();
+    setStatus("Finding room...");
 
-  me = await room.join({ name: username });
+    room = await skyway_room.SkyWayRoom.FindOrCreate(
+      context,
+      { name: roomName }
+    );
 
-  myIdEl.innerText = me.id;
+    setStatus("Getting microphone...");
 
-  // publish audio
-  await me.publish(audioStream, { type: "p2p" });
+    const mic =
+      await skyway_room.SkyWayStreamFactory
+        .createMicrophoneAudioStream();
 
-  // subscribe function
-  const subscribe = async (publication) => {
+    setStatus("Joining room...");
 
-    if (publication.publisher.id === me.id) return;
+    me = await room.join({ name: username });
 
-    const { stream } = await me.subscribe(publication.id);
+    setStatus("Publishing audio...");
 
-    const audio = document.createElement("audio");
-    audio.autoplay = true;
-    audio.playsInline = true;
-    audio.controls = false;
+    await me.publish(mic, { type: "p2p" });
 
-    stream.attach(audio);
+    document.body.addEventListener("click", async () => {
+      const a = new Audio();
+      await a.play().catch(()=>{});
+    }, { once: true });
 
-    document.body.appendChild(audio);
+    setStatus("Connected ✔");
 
-    audio.onloadedmetadata = async () => {
+    log("My ID: " + me.id);
+
+    // SUBSCRIBE FUNCTION
+    const subscribe = async (publication) => {
+
+      if (publication.publisher.id === me.id) return;
+
       try {
-        await audio.play();
-      } catch (e) {
-        console.log("autoplay blocked", e);
+
+        log("Subscribing: " + publication.publisher.id);
+
+        const { stream } = await me.subscribe(publication.id);
+
+        const audio = document.createElement("audio");
+        audio.autoplay = true;
+        audio.playsInline = true;
+
+        stream.attach(audio);
+        document.body.appendChild(audio);
+
+        await audio.play().catch(e => log("play blocked"));
+
+      } catch (err) {
+        log("SUB FAIL: " + err.message);
       }
     };
-  };
 
-  // existing users
-  room.publications.forEach(subscribe);
+    // existing
+    room.publications.forEach(subscribe);
 
-  // new users
-  room.onStreamPublished.add((e) => {
-    subscribe(e.publication);
-  });
+    // new
+    room.onStreamPublished.add((e) => {
+      subscribe(e.publication);
+    });
 
-  statusEl.innerText = "Connected to room: " + roomName;
+    // 🔥 CRITICAL: detect stuck state
+    let timeout = setTimeout(() => {
+      if (!me) {
+        setStatus("STUCK CONNECTING ❌ (retry recommended)");
+      }
+    }, 8000);
 
-  // unlock audio policy
-  document.body.addEventListener("click", async () => {
-    const tmp = new Audio();
-    await tmp.play().catch(()=>{});
-  }, { once: true });
+  } catch (err) {
+    setStatus("ERROR: " + err.message);
+    log(err.stack || err);
+  }
 
 };
 
