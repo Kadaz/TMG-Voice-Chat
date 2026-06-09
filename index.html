@@ -2,94 +2,50 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>TMG Voice Chat FIXED</title>
+<title>TMG Voice Chat</title>
 
 <style>
 body {
   font-family: Arial;
   padding: 20px;
-  display: flex;
-  gap: 20px;
 }
-
-#left { width: 300px; }
-#right { flex: 1; }
 
 input, button {
   padding: 8px;
-  margin: 5px 0;
-  width: 100%;
+  margin: 5px;
 }
 
 #status {
-  font-weight: bold;
   margin-top: 10px;
+  font-weight: bold;
 }
 
-#users {
-  border: 1px solid #ddd;
-  min-height: 120px;
-  padding: 10px;
+#log {
+  font-size: 13px;
+  color: #444;
+  margin-top: 10px;
+  white-space: pre-line;
 }
 
-.user {
-  padding: 4px;
-  border-bottom: 1px solid #eee;
-}
-
-#chatBox {
-  border: 1px solid #ddd;
-  height: 400px;
-  display: flex;
-  flex-direction: column;
-}
-
-#messages {
-  flex: 1;
-  padding: 10px;
-  overflow-y: auto;
-}
-
-#chatInput {
-  border: none;
-  border-top: 1px solid #ddd;
-  padding: 10px;
-}
-
-.msg {
-  margin-bottom: 5px;
+audio {
+  display: block;
+  margin-top: 10px;
 }
 </style>
 </head>
 
 <body>
 
-<div id="left">
-
-<h3>Voice</h3>
+<h2>TMG Voice Chat</h2>
 
 <input id="username" placeholder="Username">
-<input id="room" value="main">
-
+<input id="room" value="main" placeholder="Room">
 <button id="join">Join</button>
 
 <div id="status">Idle</div>
+<div id="log"></div>
 
-<h3>Users</h3>
-<div id="users"></div>
-
-</div>
-
-<div id="right">
-
-<h3>Chat</h3>
-
-<div id="chatBox">
-  <div id="messages"></div>
-  <input id="chatInput" placeholder="type message + Enter">
-</div>
-
-</div>
+<hr>
 
 <script src="https://cdn.jsdelivr.net/npm/@skyway-sdk/room/dist/skyway_room-latest.js"></script>
 
@@ -98,135 +54,116 @@ input, button {
 const APP_ID = "96d919fc-9c10-424b-9e4e-1addf4de2563";
 const SECRET = "dHmHOdbLzFx1Kr7YtKc7P7HPOcWgHHPN0RcyYr7AFsk=";
 
-let context, room, me, mic;
-
-let users = {};
+let context;
+let room;
+let me;
 
 const statusEl = document.getElementById("status");
-const usersEl = document.getElementById("users");
-const messagesEl = document.getElementById("messages");
+const logEl = document.getElementById("log");
 
-function renderUsers() {
-  usersEl.innerHTML = "";
-  Object.values(users).forEach(name => {
-    const div = document.createElement("div");
-    div.className = "user";
-    div.innerText = name;
-    usersEl.appendChild(div);
-  });
+function log(msg) {
+  console.log(msg);
+  logEl.innerHTML += msg + "<br>";
 }
 
-function addMsg(user, text) {
-  const div = document.createElement("div");
-  div.className = "msg";
-  div.innerText = user + ": " + text;
-  messagesEl.appendChild(div);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+function setStatus(msg) {
+  statusEl.innerText = msg;
+  log(msg);
 }
 
 document.getElementById("join").onclick = async () => {
 
+  const usernameInput = document.getElementById("username").value.trim();
+  const roomName = document.getElementById("room").value.trim();
+
   const username =
-    document.getElementById("username").value.trim() ||
+    usernameInput ||
     ("user-" + Math.random().toString(16).slice(2));
 
-  const roomName = document.getElementById("room").value;
+  try {
 
-  statusEl.innerText = "Connecting...";
+    setStatus("Creating context...");
 
-  context = await skyway_room.SkyWayContext.CreateForDevelopment(
-    APP_ID,
-    SECRET
-  );
+    context = await skyway_room.SkyWayContext.CreateForDevelopment(
+      APP_ID,
+      SECRET
+    );
 
-  room = await skyway_room.SkyWayRoom.FindOrCreate(
-    context,
-    { name: roomName }
-  );
+    setStatus("Loading room...");
 
-  me = await room.join({ name: username });
+    room = await skyway_room.SkyWayRoom.FindOrCreate(
+      context,
+      { name: roomName }
+    );
 
-  mic = await skyway_room.SkyWayStreamFactory
-    .createMicrophoneAudioStream();
+    setStatus("Getting microphone...");
 
-  await me.publish(mic);
+    const mic =
+      await skyway_room.SkyWayStreamFactory
+        .createMicrophoneAudioStream();
 
-  users[me.id] = username;
-  renderUsers();
+    setStatus("Joining room...");
 
-  statusEl.innerText = "Connected ✔";
+    me = await room.join({ name: username });
 
-  // ---------------- VOICE ----------------
-  const subscribe = async (pub) => {
-    if (pub.publisher.id === me.id) return;
+    setStatus("Publishing audio...");
 
-    const { stream } = await me.subscribe(pub.id);
+    await me.publish(mic, { type: "p2p" });
 
-    const audio = document.createElement("audio");
-    audio.autoplay = true;
+    setStatus("Connected ✔");
 
-    stream.attach(audio);
-    document.body.appendChild(audio);
-  };
+    log("My ID: " + me.id);
 
-  room.publications.forEach(subscribe);
-  room.onStreamPublished.add(e => subscribe(e.publication));
+    // ----------------------------
+    // SAFE SUBSCRIBE (CORRECT SKYWAY WAY)
+    // ----------------------------
+    const subscribe = async (publication) => {
 
-  // ---------------- CHAT FIX (REAL SYNC) ----------------
-  room.onDataStreamPublished.add(async (e) => {
+      if (publication.publisher.id === me.id) return;
 
-    const { stream } = await me.subscribe(e.publication.id);
+      try {
 
-    stream.onData.add((data) => {
+        log("Subscribing: " + publication.publisher.id);
 
-      if (!data) return;
+        const { stream } = await me.subscribe(publication.id);
 
-      if (data.type === "chat") {
-        addMsg(data.user, data.text);
+        const audio = document.createElement("audio");
+
+        audio.autoplay = true;
+        audio.playsInline = true;
+        audio.controls = false;
+
+        // 🔥 SKYWAY CORRECT METHOD
+        stream.attach(audio);
+
+        document.body.appendChild(audio);
+
+        log("Audio attached ✔");
+
+      } catch (err) {
+        log("SUB ERROR: " + err.message);
       }
+    };
 
-      if (data.type === "join") {
-        users[data.id] = data.name;
-        renderUsers();
-      }
+    // existing streams
+    room.publications.forEach(subscribe);
 
+    // new streams
+    room.onStreamPublished.add((e) => {
+      subscribe(e.publication);
     });
 
-  });
+    // safety check
+    setTimeout(() => {
+      if (!me) setStatus("STUCK?");
+    }, 8000);
 
-  // broadcast join (IMPORTANT FIX)
-  const dataStream = await me.publishDataStream();
-
-  dataStream.write({
-    type: "join",
-    id: me.id,
-    name: username
-  });
-
-  // expose for chat send
-  window._ds = dataStream;
+  } catch (err) {
+    setStatus("ERROR: " + err.message);
+    log(err.stack || err);
+  }
 
 };
-
-// ---------------- CHAT ----------------
-document.getElementById("chatInput").addEventListener("keydown", (e) => {
-
-  if (e.key === "Enter") {
-
-    const text = e.target.value.trim();
-    if (!text) return;
-
-    addMsg("me", text);
-
-    window._ds?.write({
-      type: "chat",
-      user: "me",
-      text
-    });
-
-    e.target.value = "";
-  }
-});
 
 </script>
 
