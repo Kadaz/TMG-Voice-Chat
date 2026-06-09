@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>TMG Voice Chat - FIXED</title>
+<title>TMG Voice Chat FIXED</title>
 
 <style>
 body {
@@ -98,10 +98,7 @@ input, button {
 const APP_ID = "96d919fc-9c10-424b-9e4e-1addf4de2563";
 const SECRET = "dHmHOdbLzFx1Kr7YtKc7P7HPOcWgHHPN0RcyYr7AFsk=";
 
-let context;
-let room;
-let me;
-let mic;
+let context, room, me, mic;
 
 let users = {};
 
@@ -111,7 +108,7 @@ const messagesEl = document.getElementById("messages");
 
 function renderUsers() {
   usersEl.innerHTML = "";
-  Object.entries(users).forEach(([id, name]) => {
+  Object.values(users).forEach(name => {
     const div = document.createElement("div");
     div.className = "user";
     div.innerText = name;
@@ -133,7 +130,7 @@ document.getElementById("join").onclick = async () => {
     document.getElementById("username").value.trim() ||
     ("user-" + Math.random().toString(16).slice(2));
 
-  const roomName = document.getElementById("room").value.trim();
+  const roomName = document.getElementById("room").value;
 
   statusEl.innerText = "Connecting...";
 
@@ -147,12 +144,12 @@ document.getElementById("join").onclick = async () => {
     { name: roomName }
   );
 
+  me = await room.join({ name: username });
+
   mic = await skyway_room.SkyWayStreamFactory
     .createMicrophoneAudioStream();
 
-  me = await room.join({ name: username });
-
-  await me.publish(mic, { type: "p2p" });
+  await me.publish(mic);
 
   users[me.id] = username;
   renderUsers();
@@ -161,7 +158,6 @@ document.getElementById("join").onclick = async () => {
 
   // ---------------- VOICE ----------------
   const subscribe = async (pub) => {
-
     if (pub.publisher.id === me.id) return;
 
     const { stream } = await me.subscribe(pub.id);
@@ -176,40 +172,45 @@ document.getElementById("join").onclick = async () => {
   room.publications.forEach(subscribe);
   room.onStreamPublished.add(e => subscribe(e.publication));
 
-  // ---------------- DATA (FIXED) ----------------
-  room.onDataMessage?.add((e) => {
+  // ---------------- CHAT FIX (REAL SYNC) ----------------
+  room.onDataStreamPublished.add(async (e) => {
 
-    const msg = e.data;
+    const { stream } = await me.subscribe(e.publication.id);
 
-    if (!msg) return;
+    stream.onData.add((data) => {
 
-    if (msg.type === "chat") {
-      addMsg(msg.user, msg.text);
-    }
+      if (!data) return;
 
-    if (msg.type === "join") {
-      users[msg.id] = msg.name;
-      renderUsers();
-    }
+      if (data.type === "chat") {
+        addMsg(data.user, data.text);
+      }
 
-    if (msg.type === "leave") {
-      delete users[msg.id];
-      renderUsers();
-    }
+      if (data.type === "join") {
+        users[data.id] = data.name;
+        renderUsers();
+      }
+
+    });
 
   });
 
-  // broadcast join
-  room.send({
+  // broadcast join (IMPORTANT FIX)
+  const dataStream = await me.publishDataStream();
+
+  dataStream.write({
     type: "join",
     id: me.id,
     name: username
   });
 
+  // expose for chat send
+  window._ds = dataStream;
+
 };
 
-// ---------------- CHAT INPUT ----------------
+// ---------------- CHAT ----------------
 document.getElementById("chatInput").addEventListener("keydown", (e) => {
+
   if (e.key === "Enter") {
 
     const text = e.target.value.trim();
@@ -217,9 +218,9 @@ document.getElementById("chatInput").addEventListener("keydown", (e) => {
 
     addMsg("me", text);
 
-    room.send({
+    window._ds?.write({
       type: "chat",
-      user: me.id,
+      user: "me",
       text
     });
 
