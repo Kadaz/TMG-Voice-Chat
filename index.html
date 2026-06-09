@@ -3,21 +3,25 @@
 <head>
 <meta charset="UTF-8">
 <title>TMG Voice Chat</title>
+<style>
+body { font-family: Arial; padding: 20px; }
+input, button { margin: 5px; padding: 8px; }
+audio { display: block; margin-top: 10px; }
+</style>
 </head>
+
 <body>
 
 <h2>TMG Voice Chat</h2>
 
 <input id="username" placeholder="Username">
-<input id="roomname" placeholder="Room Name" value="main">
+<input id="roomname" value="main" placeholder="Room">
 <button id="join">Join</button>
 
-<div>
-  <b>My ID:</b>
-  <span id="myid">-</span>
-</div>
+<hr>
 
-<div id="users"></div>
+<div><b>My ID:</b> <span id="myid">-</span></div>
+<div id="status"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@skyway-sdk/room/dist/skyway_room-latest.js"></script>
 
@@ -27,81 +31,89 @@ const APP_ID = "96d919fc-9c10-424b-9e4e-1addf4de2563";
 const SECRET = "dHmHOdbLzFx1Kr7YtKc7P7HPOcWgHHPN0RcyYr7AFsk=";
 
 const joinBtn = document.getElementById("join");
-const roomInput = document.getElementById("roomname");
-const usernameInput = document.getElementById("username");
 const myIdEl = document.getElementById("myid");
-const usersEl = document.getElementById("users");
+const statusEl = document.getElementById("status");
+
+let context;
+let room;
+let me;
 
 joinBtn.onclick = async () => {
 
-  const username = usernameInput.value.trim();
-  const roomName = roomInput.value.trim();
+  const username = document.getElementById("username").value.trim();
+  const roomName = document.getElementById("roomname").value.trim();
 
   if (!username || !roomName) {
-    alert("Username and Room required");
+    alert("Fill username + room");
     return;
   }
 
-  const context =
-    await skyway_room.SkyWayContext.CreateForDevelopment(
-      APP_ID,
-      SECRET
-    );
+  statusEl.innerText = "Connecting...";
 
-  const room =
-    await skyway_room.SkyWayRoom.FindOrCreate(
-      context,
-      {
-        name: roomName
-      }
-    );
-
-  const audio =
-    await skyway_room.SkyWayStreamFactory
-      .createMicrophoneAudioStream();
-
-  const me =
-    await room.join({
-      name: username
-    });
-
-  myIdEl.textContent = me.id;
-
-  await me.publish(audio, {
-    type: "p2p"
-  });
-
-  const subscribePublication = async (publication) => {
-
-    if (publication.publisher.id === me.id) {
-      return;
-    }
-
-    const { stream } =
-      await me.subscribe(publication.id);
-
-    const audioElement =
-      document.createElement("audio");
-
-    audioElement.autoplay = true;
-
-    stream.attach(audioElement);
-
-    document.body.appendChild(audioElement);
-  };
-
-  room.publications.forEach(
-    subscribePublication
+  // 🔥 SkyWay context (development mode)
+  context = await skyway_room.SkyWayContext.CreateForDevelopment(
+    APP_ID,
+    SECRET
   );
 
+  // Room create / join
+  room = await skyway_room.SkyWayRoom.FindOrCreate(
+    context,
+    { name: roomName }
+  );
+
+  // mic
+  const audioStream =
+    await skyway_room.SkyWayStreamFactory.createMicrophoneAudioStream();
+
+  me = await room.join({ name: username });
+
+  myIdEl.innerText = me.id;
+
+  // publish audio
+  await me.publish(audioStream, { type: "p2p" });
+
+  // subscribe function
+  const subscribe = async (publication) => {
+
+    if (publication.publisher.id === me.id) return;
+
+    const { stream } = await me.subscribe(publication.id);
+
+    const audio = document.createElement("audio");
+    audio.autoplay = true;
+    audio.playsInline = true;
+    audio.controls = false;
+
+    stream.attach(audio);
+
+    document.body.appendChild(audio);
+
+    audio.onloadedmetadata = async () => {
+      try {
+        await audio.play();
+      } catch (e) {
+        console.log("autoplay blocked", e);
+      }
+    };
+  };
+
+  // existing users
+  room.publications.forEach(subscribe);
+
+  // new users
   room.onStreamPublished.add((e) => {
-    subscribePublication(e.publication);
+    subscribe(e.publication);
   });
 
-  usersEl.innerHTML =
-    "<p>Connected to room: " +
-    roomName +
-    "</p>";
+  statusEl.innerText = "Connected to room: " + roomName;
+
+  // unlock audio policy
+  document.body.addEventListener("click", async () => {
+    const tmp = new Audio();
+    await tmp.play().catch(()=>{});
+  }, { once: true });
+
 };
 
 </script>
