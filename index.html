@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>TMG Voice Chat v4 Stable</title>
+<title>TMG Voice Chat v4 Stable FIX</title>
 
 <style>
 body {
@@ -27,11 +27,6 @@ input, button {
   margin-top: 10px;
 }
 
-#log {
-  font-size: 13px;
-  color: gray;
-}
-
 #users, #chatBox {
   background: white;
   padding: 10px;
@@ -48,6 +43,7 @@ body.dark #chatBox {
   display: flex;
   flex-direction: column;
   height: 260px;
+  border: 1px solid #ddd;
 }
 
 #messages {
@@ -90,6 +86,7 @@ body.dark #chatBox {
 <div id="users"></div>
 
 <h3>Chat</h3>
+
 <div id="chatBox">
   <div id="messages"></div>
   <input id="chatInput" placeholder="type message + Enter">
@@ -132,6 +129,7 @@ const usersEl = document.getElementById("users");
 
 let user = "";
 let myUserRef = null;
+
 let room = null;
 let me = null;
 let mic = null;
@@ -235,24 +233,25 @@ document.getElementById("join").onclick = async () => {
   room.onStreamPublished.add(e => subscribe(e.publication));
 };
 
-// ================= MUTE =================
+// ================= MUTE FIX =================
 document.getElementById("mute").onclick = () => {
   if (!mic) return;
 
   isMuted = !isMuted;
 
-  mic.stream.getAudioTracks().forEach(t => {
-    t.enabled = !isMuted;
-  });
+  const track = mic.stream.getAudioTracks()[0];
+
+  if (track) {
+    track.enabled = !isMuted;
+  }
 
   document.getElementById("mute").innerText =
-    isMuted ? "Unmute" : "Mute";
+    isMuted ? "🔇 Unmute" : "🎤 Mute";
 };
 
 // ================= LEAVE =================
-document.getElementById("leave").onclick = async () => {
+document.getElementById("leave").onclick = () => {
   if (myUserRef) remove(myUserRef);
-
   location.reload();
 };
 
