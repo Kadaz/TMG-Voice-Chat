@@ -76,13 +76,13 @@ document.getElementById("join").onclick = async () => {
       { name: roomName }
     );
 
-    setStatus("Getting mic...");
+    setStatus("Getting microphone...");
 
     const mic =
       await skyway_room.SkyWayStreamFactory
         .createMicrophoneAudioStream();
 
-    setStatus("Joining...");
+    setStatus("Joining room...");
 
     me = await room.join({ name: username });
 
@@ -90,13 +90,13 @@ document.getElementById("join").onclick = async () => {
 
     await me.publish(mic, { type: "p2p" });
 
-    myUnlockAudio();
+    unlockAudio();
 
     setStatus("Connected ✔");
 
     log("My ID: " + me.id);
 
-    // SUBSCRIBE WITH BOOST
+    // SUBSCRIBE (FIXED)
     const subscribe = async (publication) => {
 
       if (publication.publisher.id === me.id) return;
@@ -107,23 +107,18 @@ document.getElementById("join").onclick = async () => {
 
         const { stream } = await me.subscribe(publication.id);
 
-        const audio = document.createElement("audio");
-        audio.autoplay = true;
-        audio.playsInline = true;
-
-        // 🔥 REAL AUDIO BOOST ENGINE
+        // 🔥 FIX: stream is MediaStream directly
         const audioCtx = new AudioContext();
-        const source = audioCtx.createMediaStreamSource(stream.stream);
+
+        const source = audioCtx.createMediaStreamSource(stream);
 
         const gain = audioCtx.createGain();
-        gain.gain.value = 2.8; // 🔊 VOLUME BOOST
+        gain.gain.value = 2.8; // volume boost
 
         source.connect(gain);
         gain.connect(audioCtx.destination);
 
-        document.body.appendChild(audio);
-
-        await audio.play().catch(()=>log("autoplay blocked"));
+        log("Audio connected ✔");
 
       } catch (err) {
         log("ERROR SUB: " + err.message);
@@ -138,7 +133,7 @@ document.getElementById("join").onclick = async () => {
       subscribe(e.publication);
     });
 
-    // safety debug
+    // safety watchdog
     setTimeout(() => {
       if (!me) setStatus("STUCK?");
     }, 8000);
@@ -150,8 +145,8 @@ document.getElementById("join").onclick = async () => {
 
 };
 
-// 🔥 unlock audio policy
-function myUnlockAudio() {
+// unlock autoplay policy
+function unlockAudio() {
   document.body.addEventListener("click", async () => {
     const a = new Audio();
     await a.play().catch(()=>{});
