@@ -2,14 +2,14 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>TMG Voice Chat - Stable</title>
+<title>TMG Voice Chat</title>
 
 <style>
 body { font-family: Arial; padding: 20px; }
 input, button { padding: 8px; margin: 5px; }
 #status { margin-top: 10px; font-weight: bold; }
 #log { font-size: 13px; color: #444; margin-top: 10px; }
-audio { display: block; margin-top: 5px; }
+audio { display:block; margin-top: 5px; }
 </style>
 </head>
 
@@ -96,7 +96,9 @@ document.getElementById("join").onclick = async () => {
 
     log("My ID: " + me.id);
 
-    // SUBSCRIBE (FIXED)
+    // -------------------------
+    // SAFE SUBSCRIBE (FIXED)
+    // -------------------------
     const subscribe = async (publication) => {
 
       if (publication.publisher.id === me.id) return;
@@ -105,12 +107,23 @@ document.getElementById("join").onclick = async () => {
 
         log("Subscribing: " + publication.publisher.id);
 
-        const { stream } = await me.subscribe(publication.id);
+        const res = await me.subscribe(publication.id);
 
-        // 🔥 FIX: stream is MediaStream directly
+        // 🔥 SAFE STREAM RESOLUTION (covers all SkyWay versions)
+        const mediaStream =
+          res?.stream?.stream ||
+          res?.stream ||
+          res;
+
+        if (!mediaStream || typeof mediaStream.getTracks !== "function") {
+          log("❌ Invalid MediaStream received");
+          console.log(res);
+          return;
+        }
+
         const audioCtx = new AudioContext();
 
-        const source = audioCtx.createMediaStreamSource(stream);
+        const source = audioCtx.createMediaStreamSource(mediaStream);
 
         const gain = audioCtx.createGain();
         gain.gain.value = 2.8; // volume boost
@@ -133,7 +146,7 @@ document.getElementById("join").onclick = async () => {
       subscribe(e.publication);
     });
 
-    // safety watchdog
+    // watchdog
     setTimeout(() => {
       if (!me) setStatus("STUCK?");
     }, 8000);
