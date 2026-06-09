@@ -2,12 +2,13 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>TMG Voice Chat v3</title>
+<title>TMG Voice Chat v4 (Discord Mode)</title>
 
 <style>
 body {
   font-family: Arial;
   padding: 20px;
+  background: #f5f5f5;
 }
 
 input, button {
@@ -16,30 +17,38 @@ input, button {
 }
 
 #status {
-  margin-top: 10px;
   font-weight: bold;
+  margin-top: 10px;
 }
 
 #log {
   font-size: 13px;
-  color: #444;
+  color: #555;
   margin-top: 10px;
-  white-space: pre-line;
+}
+
+#users {
+  margin-top: 10px;
+  font-size: 14px;
+  padding: 10px;
+  background: white;
+  border-radius: 6px;
 }
 
 #chatBox {
   margin-top: 20px;
-  border: 1px solid #ddd;
-  height: 200px;
+  background: white;
+  border-radius: 6px;
   display: flex;
   flex-direction: column;
+  height: 260px;
+  border: 1px solid #ddd;
 }
 
 #messages {
   flex: 1;
   overflow-y: auto;
   padding: 10px;
-  font-size: 14px;
 }
 
 #chatInput {
@@ -48,19 +57,23 @@ input, button {
   padding: 10px;
 }
 
-#users {
-  margin-top: 10px;
-  font-size: 14px;
+.msg {
+  margin-bottom: 5px;
+}
+
+.system {
+  color: gray;
+  font-style: italic;
 }
 </style>
 </head>
 
 <body>
 
-<h2>TMG Voice Chat v3</h2>
+<h2>TMG Voice Chat v4</h2>
 
 <input id="username" placeholder="Username">
-<input id="room" value="main" placeholder="Room">
+<input id="room" value="main">
 <button id="join">Join</button>
 
 <div id="status">Idle</div>
@@ -80,7 +93,6 @@ input, button {
 
 <script type="module">
 
-// ================= FIREBASE =================
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import {
   getDatabase,
@@ -108,7 +120,6 @@ const db = getDatabase(app);
 const chatRef = ref(db, "chat");
 const usersRef = ref(db, "users");
 
-// ================= UI =================
 const messagesEl = document.getElementById("messages");
 const chatInput = document.getElementById("chatInput");
 const usersEl = document.getElementById("users");
@@ -116,14 +127,15 @@ const usersEl = document.getElementById("users");
 let user = "";
 let myUserRef = null;
 
-function addMsg(u, text) {
+function addMsg(text, type = "msg") {
   const div = document.createElement("div");
-  div.textContent = u + ": " + text;
+  div.className = type;
+  div.textContent = text;
   messagesEl.appendChild(div);
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
-// CHAT SEND
+// CHAT
 chatInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
     const text = chatInput.value.trim();
@@ -132,6 +144,7 @@ chatInput.addEventListener("keydown", (e) => {
     push(chatRef, {
       user,
       text,
+      type: "msg",
       time: Date.now()
     });
 
@@ -139,54 +152,43 @@ chatInput.addEventListener("keydown", (e) => {
   }
 });
 
-// CHAT RECEIVE
 onChildAdded(chatRef, (snap) => {
   const msg = snap.val();
-  addMsg(msg.user, msg.text);
+
+  if (msg.type === "system") {
+    addMsg("• " + msg.text, "system");
+  } else {
+    addMsg(msg.user + ": " + msg.text);
+  }
 });
 
-// USERS LIVE (REAL)
+// USERS
 onValue(usersRef, (snap) => {
   const data = snap.val() || {};
-
   usersEl.innerHTML = "";
 
-  Object.values(data).forEach((u) => {
+  Object.values(data).forEach(u => {
     const div = document.createElement("div");
     div.textContent = "🟢 " + u.name;
     usersEl.appendChild(div);
   });
 });
 
-// ================= SKYWAY =================
+// SKYWAY
 const APP_ID = "96d919fc-9c10-424b-9e4e-1addf4de2563";
 const SECRET = "dHmHOdbLzFx1Kr7YtKc7P7HPOcWgHHPN0RcyYr7AFsk=";
 
 let room;
 let me;
 
-const statusEl = document.getElementById("status");
-const logEl = document.getElementById("log");
-
-function log(msg) {
-  logEl.innerHTML += msg + "<br>";
-}
-
-function setStatus(msg) {
-  statusEl.innerText = msg;
-  log(msg);
-}
-
 document.getElementById("join").onclick = async () => {
 
   const username = document.getElementById("username").value.trim();
   const roomName = document.getElementById("room").value.trim();
 
-  if (!username) return alert("βάλε username");
+  if (!username) return;
 
   user = username;
-
-  setStatus("Loading...");
 
   const context = await skyway_room.SkyWayContext.CreateForDevelopment(
     APP_ID,
@@ -204,11 +206,8 @@ document.getElementById("join").onclick = async () => {
 
   await me.publish(mic, { type: "p2p" });
 
-  setStatus("Connected ✔");
+  addMsg("• " + username + " joined", "system");
 
-  log("My ID: " + me.id);
-
-  // ================= USERS ONLINE =================
   myUserRef = ref(db, "users/" + username);
 
   set(myUserRef, {
@@ -219,13 +218,18 @@ document.getElementById("join").onclick = async () => {
 
   window.addEventListener("beforeunload", () => {
     remove(myUserRef);
+    push(chatRef, {
+      user: "system",
+      text: username + " left",
+      type: "system",
+      time: Date.now()
+    });
   });
 
-  // ================= VOICE =================
-  const subscribe = async (publication) => {
-    if (publication.publisher.id === me.id) return;
+  const subscribe = async (pub) => {
+    if (pub.publisher.id === me.id) return;
 
-    const { stream } = await me.subscribe(publication.id);
+    const { stream } = await me.subscribe(pub.id);
 
     const audio = document.createElement("audio");
     audio.autoplay = true;
@@ -236,12 +240,8 @@ document.getElementById("join").onclick = async () => {
 
   room.publications.forEach(subscribe);
 
-  room.onStreamPublished.add((e) => {
-    subscribe(e.publication);
-  });
+  room.onStreamPublished.add(e => subscribe(e.publication));
 };
-
-setStatus("Ready");
 
 </script>
 
