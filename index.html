@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>TMG Voice Chat + Firebase Chat</title>
+<title>TMG Voice Chat + Firebase</title>
 
 <style>
 body {
@@ -47,6 +47,11 @@ input, button {
   border-top: 1px solid #ddd;
   padding: 10px;
 }
+
+#users {
+  margin-top: 10px;
+  font-size: 14px;
+}
 </style>
 </head>
 
@@ -61,7 +66,8 @@ input, button {
 <div id="status">Idle</div>
 <div id="log"></div>
 
-<hr>
+<h3>Online Users</h3>
+<div id="users"></div>
 
 <h3>Chat</h3>
 
@@ -95,13 +101,16 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
-const chatRef = ref(db, "chat");
 
-// ================= CHAT =================
+const chatRef = ref(db, "chat");
+const usersRef = ref(db, "users");
+
+// ================= UI =================
 const messagesEl = document.getElementById("messages");
 const chatInput = document.getElementById("chatInput");
+const usersEl = document.getElementById("users");
 
-const user = "user-" + Math.random().toString(16).slice(2, 6);
+let user = "";
 
 function addMsg(u, text) {
   const div = document.createElement("div");
@@ -110,6 +119,7 @@ function addMsg(u, text) {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
+// CHAT SEND
 chatInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
     const text = chatInput.value.trim();
@@ -125,16 +135,26 @@ chatInput.addEventListener("keydown", (e) => {
   }
 });
 
+// CHAT RECEIVE
 onChildAdded(chatRef, (snap) => {
   const msg = snap.val();
   addMsg(msg.user, msg.text);
 });
 
-// ================= SKYWAY VOICE =================
+// USERS ONLINE
+onChildAdded(usersRef, (snap) => {
+  const u = snap.val();
+
+  const div = document.createElement("div");
+  div.textContent = "🟢 " + u.name;
+
+  usersEl.appendChild(div);
+});
+
+// ================= SKYWAY =================
 const APP_ID = "96d919fc-9c10-424b-9e4e-1addf4de2563";
 const SECRET = "dHmHOdbLzFx1Kr7YtKc7P7HPOcWgHHPN0RcyYr7AFsk=";
 
-let context;
 let room;
 let me;
 
@@ -152,73 +172,60 @@ function setStatus(msg) {
 
 document.getElementById("join").onclick = async () => {
 
-  const username =
-    document.getElementById("username").value.trim() ||
-    user;
-
+  const username = document.getElementById("username").value.trim();
   const roomName = document.getElementById("room").value.trim();
 
-  try {
+  if (!username) return alert("βάλε username");
 
-    setStatus("Creating context...");
+  user = username;
 
-    context = await skyway_room.SkyWayContext.CreateForDevelopment(
-      APP_ID,
-      SECRET
-    );
+  setStatus("Loading...");
 
-    setStatus("Loading room...");
+  const context = await skyway_room.SkyWayContext.CreateForDevelopment(
+    APP_ID,
+    SECRET
+  );
 
-    room = await skyway_room.SkyWayRoom.FindOrCreate(
-      context,
-      { name: roomName }
-    );
+  room = await skyway_room.SkyWayRoom.FindOrCreate(
+    context,
+    { name: roomName }
+  );
 
-    setStatus("Getting microphone...");
+  const mic = await skyway_room.SkyWayStreamFactory.createMicrophoneAudioStream();
 
-    const mic =
-      await skyway_room.SkyWayStreamFactory
-        .createMicrophoneAudioStream();
+  me = await room.join({ name: username });
 
-    setStatus("Joining room...");
+  await me.publish(mic, { type: "p2p" });
 
-    me = await room.join({ name: username });
+  setStatus("Connected ✔");
 
-    setStatus("Publishing audio...");
+  log("My ID: " + me.id);
 
-    await me.publish(mic, { type: "p2p" });
+  // publish user online
+  push(usersRef, {
+    name: username,
+    time: Date.now()
+  });
 
-    setStatus("Connected ✔");
+  const subscribe = async (publication) => {
+    if (publication.publisher.id === me.id) return;
 
-    log("My ID: " + me.id);
+    const { stream } = await me.subscribe(publication.id);
 
-    const subscribe = async (publication) => {
+    const audio = document.createElement("audio");
+    audio.autoplay = true;
 
-      if (publication.publisher.id === me.id) return;
+    stream.attach(audio);
+    document.body.appendChild(audio);
+  };
 
-      const { stream } = await me.subscribe(publication.id);
+  room.publications.forEach(subscribe);
 
-      const audio = document.createElement("audio");
-      audio.autoplay = true;
-      audio.playsInline = true;
-
-      stream.attach(audio);
-      document.body.appendChild(audio);
-    };
-
-    room.publications.forEach(subscribe);
-
-    room.onStreamPublished.add((e) => {
-      subscribe(e.publication);
-    });
-
-  } catch (err) {
-    setStatus("ERROR: " + err.message);
-    log(err.stack || err);
-  }
+  room.onStreamPublished.add((e) => {
+    subscribe(e.publication);
+  });
 };
 
-// ================= SAFE INIT =================
 setStatus("Ready");
 
 </script>
