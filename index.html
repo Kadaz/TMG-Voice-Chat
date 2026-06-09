@@ -5,11 +5,32 @@
 <title>TMG Voice Chat</title>
 
 <style>
-body { font-family: Arial; padding: 20px; }
-input, button { padding: 8px; margin: 5px; }
-#status { margin-top: 10px; font-weight: bold; }
-#log { font-size: 13px; color: #444; margin-top: 10px; }
-audio { display:block; margin-top: 5px; }
+body {
+  font-family: Arial;
+  padding: 20px;
+}
+
+input, button {
+  padding: 8px;
+  margin: 5px;
+}
+
+#status {
+  margin-top: 10px;
+  font-weight: bold;
+}
+
+#log {
+  font-size: 13px;
+  color: #444;
+  margin-top: 10px;
+  white-space: pre-line;
+}
+
+audio {
+  display: block;
+  margin-top: 10px;
+}
 </style>
 </head>
 
@@ -52,13 +73,12 @@ function setStatus(msg) {
 
 document.getElementById("join").onclick = async () => {
 
-  const username = document.getElementById("username").value.trim();
+  const usernameInput = document.getElementById("username").value.trim();
   const roomName = document.getElementById("room").value.trim();
 
-  if (!username || !roomName) {
-    alert("Fill username + room");
-    return;
-  }
+  const username =
+    usernameInput ||
+    ("user-" + Math.random().toString(16).slice(2));
 
   try {
 
@@ -90,15 +110,13 @@ document.getElementById("join").onclick = async () => {
 
     await me.publish(mic, { type: "p2p" });
 
-    unlockAudio();
-
     setStatus("Connected ✔");
 
     log("My ID: " + me.id);
 
-    // -------------------------
-    // SAFE SUBSCRIBE (FIXED)
-    // -------------------------
+    // ----------------------------
+    // SAFE SUBSCRIBE (CORRECT SKYWAY WAY)
+    // ----------------------------
     const subscribe = async (publication) => {
 
       if (publication.publisher.id === me.id) return;
@@ -107,46 +125,35 @@ document.getElementById("join").onclick = async () => {
 
         log("Subscribing: " + publication.publisher.id);
 
-        const res = await me.subscribe(publication.id);
+        const { stream } = await me.subscribe(publication.id);
 
-        // 🔥 SAFE STREAM RESOLUTION (covers all SkyWay versions)
-        const mediaStream =
-          res?.stream?.stream ||
-          res?.stream ||
-          res;
+        const audio = document.createElement("audio");
 
-        if (!mediaStream || typeof mediaStream.getTracks !== "function") {
-          log("❌ Invalid MediaStream received");
-          console.log(res);
-          return;
-        }
+        audio.autoplay = true;
+        audio.playsInline = true;
+        audio.controls = false;
 
-        const audioCtx = new AudioContext();
+        // 🔥 SKYWAY CORRECT METHOD
+        stream.attach(audio);
 
-        const source = audioCtx.createMediaStreamSource(mediaStream);
+        document.body.appendChild(audio);
 
-        const gain = audioCtx.createGain();
-        gain.gain.value = 2.8; // volume boost
-
-        source.connect(gain);
-        gain.connect(audioCtx.destination);
-
-        log("Audio connected ✔");
+        log("Audio attached ✔");
 
       } catch (err) {
-        log("ERROR SUB: " + err.message);
+        log("SUB ERROR: " + err.message);
       }
     };
 
-    // existing users
+    // existing streams
     room.publications.forEach(subscribe);
 
-    // new users
+    // new streams
     room.onStreamPublished.add((e) => {
       subscribe(e.publication);
     });
 
-    // watchdog
+    // safety check
     setTimeout(() => {
       if (!me) setStatus("STUCK?");
     }, 8000);
@@ -157,14 +164,6 @@ document.getElementById("join").onclick = async () => {
   }
 
 };
-
-// unlock autoplay policy
-function unlockAudio() {
-  document.body.addEventListener("click", async () => {
-    const a = new Audio();
-    await a.play().catch(()=>{});
-  }, { once: true });
-}
 
 </script>
 
