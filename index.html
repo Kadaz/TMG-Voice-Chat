@@ -2,13 +2,13 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>TMG Voice Chat v5 Discord Mode</title>
+<title>TMG Voice Chat v4 (Discord Mode)</title>
 
 <style>
 body {
   font-family: Arial;
   padding: 20px;
-  background: #f4f4f4;
+  background: #f5f5f5;
 }
 
 input, button {
@@ -21,9 +21,17 @@ input, button {
   margin-top: 10px;
 }
 
+#log {
+  font-size: 13px;
+  color: #555;
+  margin-top: 10px;
+}
+
 #users {
-  background: white;
+  margin-top: 10px;
+  font-size: 14px;
   padding: 10px;
+  background: white;
   border-radius: 6px;
 }
 
@@ -31,9 +39,9 @@ input, button {
   margin-top: 20px;
   background: white;
   border-radius: 6px;
-  height: 260px;
   display: flex;
   flex-direction: column;
+  height: 260px;
   border: 1px solid #ddd;
 }
 
@@ -49,30 +57,29 @@ input, button {
   padding: 10px;
 }
 
-.msg { margin-bottom: 5px; }
-.system { color: gray; font-style: italic; }
+.msg {
+  margin-bottom: 5px;
+}
 
-.userRow {
-  display: flex;
-  justify-content: space-between;
-  padding: 4px 0;
+.system {
+  color: gray;
+  font-style: italic;
 }
 </style>
 </head>
 
 <body>
 
-<h2>TMG Voice Chat v5</h2>
+<h2>TMG Voice Chat v4</h2>
 
 <input id="username" placeholder="Username">
 <input id="room" value="main">
 <button id="join">Join</button>
 
-<button id="muteBtn">🎤 Mute</button>
-
 <div id="status">Idle</div>
+<div id="log"></div>
 
-<h3>Users</h3>
+<h3>Online Users</h3>
 <div id="users"></div>
 
 <h3>Chat</h3>
@@ -98,7 +105,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBBQBBQ",
+  apiKey: "AIzaSyBBQDKV4YiwW8CBlxSXwgV6ppGuvC_mLPs",
   authDomain: "tmg-voice-chat.firebaseapp.com",
   databaseURL: "https://tmg-voice-chat-default-rtdb.europe-west1.firebasedatabase.app",
   projectId: "tmg-voice-chat",
@@ -119,11 +126,8 @@ const usersEl = document.getElementById("users");
 
 let user = "";
 let myUserRef = null;
-let micStream = null;
-let isMuted = false;
 
-// ================= CHAT =================
-function addMsg(text, type="msg") {
+function addMsg(text, type = "msg") {
   const div = document.createElement("div");
   div.className = type;
   div.textContent = text;
@@ -131,6 +135,7 @@ function addMsg(text, type="msg") {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
+// CHAT
 chatInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
     const text = chatInput.value.trim();
@@ -139,6 +144,7 @@ chatInput.addEventListener("keydown", (e) => {
     push(chatRef, {
       user,
       text,
+      type: "msg",
       time: Date.now()
     });
 
@@ -156,24 +162,19 @@ onChildAdded(chatRef, (snap) => {
   }
 });
 
-// ================= USERS =================
+// USERS
 onValue(usersRef, (snap) => {
   const data = snap.val() || {};
   usersEl.innerHTML = "";
 
-  Object.entries(data).forEach(([id, u]) => {
+  Object.values(data).forEach(u => {
     const div = document.createElement("div");
-
-    const status = u.speaking ? " 🔊" : " 🟢";
-
-    div.className = "userRow";
-    div.innerHTML = `<span>${status} ${u.name}</span>`;
-
+    div.textContent = "🟢 " + u.name;
     usersEl.appendChild(div);
   });
 });
 
-// ================= SKYWAY =================
+// SKYWAY
 const APP_ID = "96d919fc-9c10-424b-9e4e-1addf4de2563";
 const SECRET = "dHmHOdbLzFx1Kr7YtKc7P7HPOcWgHHPN0RcyYr7AFsk=";
 
@@ -199,11 +200,11 @@ document.getElementById("join").onclick = async () => {
     { name: roomName }
   );
 
-  micStream = await skyway_room.SkyWayStreamFactory.createMicrophoneAudioStream();
+  const mic = await skyway_room.SkyWayStreamFactory.createMicrophoneAudioStream();
 
   me = await room.join({ name: username });
 
-  await me.publish(micStream, { type: "p2p" });
+  await me.publish(mic, { type: "p2p" });
 
   addMsg("• " + username + " joined", "system");
 
@@ -211,56 +212,20 @@ document.getElementById("join").onclick = async () => {
 
   set(myUserRef, {
     name: username,
-    speaking: false,
+    online: true,
     time: Date.now()
   });
 
   window.addEventListener("beforeunload", () => {
     remove(myUserRef);
-  });
-
-  // ================= SPEAKING DETECTION =================
-  const ctx = new AudioContext();
-  const source = ctx.createMediaStreamSource(micStream.stream);
-  const analyser = ctx.createAnalyser();
-  source.connect(analyser);
-
-  const data = new Uint8Array(analyser.fftSize);
-
-  function detectSpeech() {
-    analyser.getByteTimeDomainData(data);
-
-    let volume = 0;
-    for (let i = 0; i < data.length; i++) {
-      volume += Math.abs(data[i] - 128);
-    }
-
-    const speaking = volume > 300;
-
-    set(myUserRef, {
-      name: username,
-      speaking: speaking,
+    push(chatRef, {
+      user: "system",
+      text: username + " left",
+      type: "system",
       time: Date.now()
     });
+  });
 
-    requestAnimationFrame(detectSpeech);
-  }
-
-  detectSpeech();
-
-  // ================= MUTE =================
-  document.getElementById("muteBtn").onclick = () => {
-    isMuted = !isMuted;
-
-    micStream.stream.getAudioTracks().forEach(t => {
-      t.enabled = !isMuted;
-    });
-
-    document.getElementById("muteBtn").innerText =
-      isMuted ? "🔇 Unmute" : "🎤 Mute";
-  };
-
-  // ================= VOICE =================
   const subscribe = async (pub) => {
     if (pub.publisher.id === me.id) return;
 
