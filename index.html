@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>TMG Voice Chat - Discord Mode v1</title>
+<title>TMG Voice Chat - FIXED</title>
 
 <style>
 body {
@@ -30,11 +30,10 @@ input, button {
   border: 1px solid #ddd;
   min-height: 120px;
   padding: 10px;
-  margin-top: 10px;
 }
 
 .user {
-  padding: 5px;
+  padding: 4px;
   border-bottom: 1px solid #eee;
 }
 
@@ -112,16 +111,15 @@ const messagesEl = document.getElementById("messages");
 
 function renderUsers() {
   usersEl.innerHTML = "";
-
   Object.entries(users).forEach(([id, name]) => {
     const div = document.createElement("div");
     div.className = "user";
-    div.innerText = name + " (" + id.slice(0,4) + ")";
+    div.innerText = name;
     usersEl.appendChild(div);
   });
 }
 
-function logChat(user, text) {
+function addMsg(user, text) {
   const div = document.createElement("div");
   div.className = "msg";
   div.innerText = user + ": " + text;
@@ -172,45 +170,40 @@ document.getElementById("join").onclick = async () => {
     audio.autoplay = true;
 
     stream.attach(audio);
-
     document.body.appendChild(audio);
   };
 
   room.publications.forEach(subscribe);
   room.onStreamPublished.add(e => subscribe(e.publication));
 
-  // ---------------- CHAT + DATA ----------------
-  me.onDataStream?.add((event) => {
+  // ---------------- DATA (FIXED) ----------------
+  room.onDataMessage?.add((e) => {
 
-    const msg = event.data;
+    const msg = e.data;
 
     if (!msg) return;
 
-    // CHAT
     if (msg.type === "chat") {
-      logChat(msg.data.user, msg.data.text);
+      addMsg(msg.user, msg.text);
     }
 
-    // USER JOIN
-    if (msg.type === "user-join") {
-      users[msg.data.id] = msg.data.name;
+    if (msg.type === "join") {
+      users[msg.id] = msg.name;
       renderUsers();
     }
 
-    // USER LEAVE
-    if (msg.type === "user-leave") {
-      delete users[msg.data.id];
+    if (msg.type === "leave") {
+      delete users[msg.id];
       renderUsers();
     }
+
   });
 
   // broadcast join
-  me.sendData({
-    type: "user-join",
-    data: {
-      id: me.id,
-      name: username
-    }
+  room.send({
+    type: "join",
+    id: me.id,
+    name: username
   });
 
 };
@@ -222,30 +215,15 @@ document.getElementById("chatInput").addEventListener("keydown", (e) => {
     const text = e.target.value.trim();
     if (!text) return;
 
-    logChat("me", text);
+    addMsg("me", text);
 
-    me.sendData({
+    room.send({
       type: "chat",
-      data: {
-        user: me.id,
-        text
-      }
+      user: me.id,
+      text
     });
 
     e.target.value = "";
-  }
-});
-
-// ---------------- PUSH TO TALK ----------------
-document.addEventListener("keydown", (e) => {
-  if (e.code === "Space" && mic) {
-    mic.enabled = true;
-  }
-});
-
-document.addEventListener("keyup", (e) => {
-  if (e.code === "Space" && mic) {
-    mic.enabled = false;
   }
 });
 
