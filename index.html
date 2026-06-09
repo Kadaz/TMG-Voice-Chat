@@ -2,7 +2,10 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>TMG Voice Chat v4 Stable FIX</title>
+<title>TMG Voice Chat v4 Stable</title>
+
+<!-- ✅ FAVICON -->
+<link rel="icon" type="image/x-icon" href="favicon.ico">
 
 <style>
 body {
@@ -126,6 +129,7 @@ const usersRef = ref(db, "users");
 const messagesEl = document.getElementById("messages");
 const chatInput = document.getElementById("chatInput");
 const usersEl = document.getElementById("users");
+const statusEl = document.getElementById("status");
 
 let user = "";
 let myUserRef = null;
@@ -134,6 +138,11 @@ let room = null;
 let me = null;
 let mic = null;
 let isMuted = false;
+
+// ================= STATUS =================
+function setStatus(text) {
+  statusEl.innerText = text;
+}
 
 // ================= CHAT =================
 function addMsg(text, type="msg") {
@@ -185,6 +194,8 @@ onValue(usersRef, (snap) => {
 // ================= JOIN =================
 document.getElementById("join").onclick = async () => {
 
+  setStatus("Connecting...");
+
   const username = document.getElementById("username").value.trim();
   const roomName = document.getElementById("room").value.trim();
 
@@ -207,6 +218,8 @@ document.getElementById("join").onclick = async () => {
   me = await room.join({ name: username });
 
   await me.publish(mic, { type: "p2p" });
+
+  setStatus("Connected ✔");
 
   addMsg("• " + username + " joined", "system");
 
@@ -233,17 +246,14 @@ document.getElementById("join").onclick = async () => {
   room.onStreamPublished.add(e => subscribe(e.publication));
 };
 
-// ================= MUTE FIX =================
+// ================= MUTE =================
 document.getElementById("mute").onclick = () => {
   if (!mic) return;
 
   isMuted = !isMuted;
 
   const track = mic.stream.getAudioTracks()[0];
-
-  if (track) {
-    track.enabled = !isMuted;
-  }
+  if (track) track.enabled = !isMuted;
 
   document.getElementById("mute").innerText =
     isMuted ? "🔇 Unmute" : "🎤 Mute";
@@ -251,7 +261,10 @@ document.getElementById("mute").onclick = () => {
 
 // ================= LEAVE =================
 document.getElementById("leave").onclick = () => {
+  setStatus("Disconnected");
+
   if (myUserRef) remove(myUserRef);
+
   location.reload();
 };
 
